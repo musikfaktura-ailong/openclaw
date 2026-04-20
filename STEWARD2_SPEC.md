@@ -1814,7 +1814,14 @@ Non-structural notes: (1) `session-projection.ts` is create-only — sufficient 
 No structural findings.
 
 ### Verification gate output
-*Pending — awaiting `STEWARD2 VERIFY WS-A`*
+Verifier (Codex): initial verification exposed a compatibility regression in `session-projection.ts`, where the steward DB hash overwrote an existing OpenClaw JSON `sessionId`. Corrected by preserving any existing JSON `sessionId` and only backfilling when the compatibility entry had none. Verification rerun from the start after the fix.
+
+Verification evidence:
+- targeted WS-A suite: `corepack pnpm exec vitest run src/steward/runtime/ws-a.integration.test.ts` — pass (`1` file, `4` tests)
+- touched OpenClaw seam regressions: `corepack pnpm exec vitest run src/config/sessions/store.session-key-normalization.test.ts src/agents/command/session-store.test.ts src/channels/session.test.ts` — pass (`3` files, `12` tests)
+- direct DB/runtime inspection covered by `ws-a.integration.test.ts`: migration bootstrap, deterministic steward session id, CAS stale-write rejection, inbound `running` state, completion `idle` state, flow completion, and append-only runtime events
+
+Verdict: **PASS**. WS-A acceptance evidence is satisfied; DB is authoritative for runtime state while `sessions.json` remains compatibility-valid for existing OpenClaw surfaces.
 
 ### Advancement gate output
 *Pending*
@@ -1823,10 +1830,10 @@ No structural findings.
 
 ## Current tasks
 
-Current phase: **verify Workstream A**.
+Current phase: **await Advancement gate for Workstream A**.
 
 Immediate next tasks:
-1. run `STEWARD2 VERIFY WS-A` — Codex runs OpenClaw regression suite + targeted WS-A tests + direct DB inspection
+1. Claude reviews the WS-A verification evidence and records the Advancement gate decision
 2. resolve BD-4 before the first LLM-dependent steward module starts
 3. resolve BD-3 before Workstream G starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact

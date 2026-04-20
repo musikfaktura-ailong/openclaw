@@ -10,13 +10,14 @@ export async function projectSessionToCompatibilityStore(params: {
   const updatedAt = params.updatedAt ?? Date.now();
   await updateSessionStore(params.storePath, (store) => {
     const existing = store[params.sessionKey];
-    // Always align sessionId to the steward-authoritative value.
-    // If the entry already exists with the correct sessionId, no write is needed.
-    if (existing?.sessionId === params.stewardSessionId) {
+    // JSON stays an OpenClaw compatibility surface in WS-A.
+    // Preserve any existing sessionId and only backfill when the entry has none.
+    const compatibilitySessionId = existing?.sessionId ?? params.stewardSessionId;
+    if (existing?.sessionId === compatibilitySessionId) {
       return existing;
     }
     const next: SessionEntry = mergeSessionEntry(existing, {
-      sessionId: params.stewardSessionId,
+      sessionId: compatibilitySessionId,
       updatedAt,
     });
     store[params.sessionKey] = next;
