@@ -574,7 +574,7 @@ This board is the single glanceable source of implementation readiness.
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
-| F | Tool supervisor | `implement` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
+| F | Tool supervisor | `confirm` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
 
@@ -1860,7 +1860,15 @@ Non-structural note: `postcheck()` (result normalization from `tool_supervisor.p
 No structural findings.
 
 ### Verification gate output
-*Pending*
+Verifier (Codex): targeted Workstream F verification passed on branch `ws-f`.
+
+Verification evidence:
+- targeted tests passed: `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts src/agents/pi-tools.before-tool-call.steward-precheck.test.ts` — pass (`2` files, `6` tests)
+- direct DB artifact inspection: `tool-supervisor.test.ts` initializes steward DB, triggers a deterministic `web_fetch` hard-fail, and directly queries `steward_events` for `tool.precheck.blocked`, confirming typed event persistence with message and JSON payload
+- runtime trace evidence: `pi-tools.before-tool-call.steward-precheck.test.ts` verifies a wrapped tool call is rejected before underlying tool execution on both `hard_fail` (`web_search` missing query) and `reroute` (`exec` with URL acquisition) paths; `execute` is not called in either case
+- seam evidence: verification exercised the actual host-owned wrapper seam in `runBeforeToolCallHook()` / `wrapToolWithBeforeToolCallHook()`, not an isolated helper detached from dispatch
+
+Verdict: **PASS**. Workstream F acceptance evidence is satisfied for module/boundary/persistence/test/runtime categories. Workstream F is now in `confirm` state and is ready for an Advancement gate decision.
 
 ### Advancement gate output
 *Pending*
@@ -1869,10 +1877,10 @@ No structural findings.
 
 ## Current tasks
 
-Current phase: **verify Workstream F**.
+Current phase: **Workstream F confirm-ready; await Advancement gate**.
 
 Immediate next tasks:
-1. run `STEWARD2 VERIFY WS-F` — Codex runs targeted WS-F tests + seam regression tests + direct DB event inspection
+1. reviewer/approver records the Workstream F Advancement gate decision
 2. resolve BD-4 before the first LLM-dependent steward module starts
 3. resolve BD-3 before Workstream G starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
