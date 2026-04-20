@@ -574,7 +574,7 @@ This board is the single glanceable source of implementation readiness.
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
-| F | Tool supervisor | `analyze` | `no` | depends on `A`; no local blocker beyond upstream readiness |
+| F | Tool supervisor | `implement` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
 
@@ -1830,21 +1830,42 @@ The revert of `session-projection.ts` in the verify commit is architecturally co
 
 All acceptance criteria satisfied: 4/4 WS-A integration tests pass; 12/12 OpenClaw seam regression tests pass; all BD-1/2/5/7 resolution requirements confirmed; no structural regressions; DB is the canonical runtime authority for all sessions.
 
+## Workstream F handoff record
+
+### Spec gate output
+Architect: invariant defined (host-owned structural tool precheck before consequence logic and execution), donor sources recorded (`core/tool_supervisor.py`, `ii_agent/agents/tools/base.py`), and Workstream A dependency satisfied. Workstream F may start because it has no open local blocker beyond upstream readiness.
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/tool/precheck-rules.ts` and `src/steward/tool/tool-supervisor.ts`. Modified `src/agents/pi-tools.before-tool-call.ts` so the steward precheck runs inside the existing host-owned `before_tool_call` wrapper seam before actual tool execution. Modified `src/steward/db/runtime-schema.ts` to register a typed precheck event kind for DB event persistence. Added targeted tests in `src/steward/tool/tool-supervisor.test.ts` and `src/agents/pi-tools.before-tool-call.steward-precheck.test.ts`.
+
+Local implementation evidence gathered during coding:
+- targeted tests passed: `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts src/agents/pi-tools.before-tool-call.steward-precheck.test.ts`
+- attempted to run existing `src/agents/pi-tools.before-tool-call.integration.e2e.test.ts`, but this repo's Vitest project config excludes `*.e2e.test.ts` from the active project selection; this is not claimed as verification evidence
+
+### Review gate output
+*Pending*
+
+### Verification gate output
+*Pending*
+
+### Advancement gate output
+*Pending*
+
 ---
 
 ## Current tasks
 
-Current phase: **Workstream A advance-ready; open next workstream**.
+Current phase: **implement Workstream F**.
 
 Immediate next tasks:
-1. merge `ws-a` into `main`
-2. resolve BD-4 before the first LLM-dependent steward module starts
-3. resolve BD-3 before Workstream G starts
-4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
-5. resolve BD-6 before Workstream D acceptance
+1. review Workstream F against the invariant, donor fit, and the existing before-tool-call seam
+2. run the required verification set for Workstream F and inspect DB event artifacts directly
+3. resolve BD-4 before the first LLM-dependent steward module starts
+4. resolve BD-3 before Workstream G starts
+5. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
-- direct code port of downstream workstreams beyond Workstream A
+- direct code port of downstream workstreams beyond the active Workstream F slice
 - replacement of OpenClaw session store as a whole; Workstream A uses DB authority plus JSON compatibility projection
 - any LLM-dependent steward module before `BD-4` is resolved
 - Workstream G before `BD-3` is resolved

@@ -6,6 +6,7 @@ import { copyPluginToolMeta } from "../plugins/tools.js";
 import { PluginApprovalResolutions, type PluginApprovalResolution } from "../plugins/types.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
 import { isPlainObject } from "../utils.js";
+import { precheckToolCall } from "../steward/tool/tool-supervisor.js";
 import { copyChannelAgentToolMeta } from "./channel-tools.js";
 import { normalizeToolName } from "./tool-policy.js";
 import type { AnyAgentTool } from "./tools/common.js";
@@ -93,6 +94,17 @@ function shouldEmitLoopWarning(state: SessionState, warningKey: string, count: n
     }
   }
   return true;
+}
+
+function formatPrecheckBlockReason(params: {
+  verdict: "hard_fail" | "reroute" | "refuse";
+  reason: string;
+  rerouteToolName?: string;
+}): string {
+  if (params.verdict === "reroute" && params.rerouteToolName) {
+    return `Reroute to ${params.rerouteToolName}: ${params.reason}`;
+  }
+  return params.reason;
 }
 
 async function recordLoopOutcome(args: {
@@ -186,7 +198,27 @@ export async function runBeforeToolCallHook(args: {
   }
 
   const hookRunner = getGlobalHookRunner();
-  if (!hookRunner?.hasHooks("before_tool_call")) {
+  const hasPluginHooks = hookRunner?.hasHooks("before_tool_call") === true;
+  if (!hasPluginHooks) {
+    const supervisorResult = precheckToolCall({
+      toolName,
+      args: args.params,
+      sessionKey: args.ctx?.sessionKey,
+    });
+    if (
+      supervisorResult.verdict === "hard_fail" ||
+      supervisorResult.verdict === "refuse" ||
+      supervisorResult.verdict === "reroute"
+    ) {
+      return {
+        blocked: true,
+        reason: formatPrecheckBlockReason({
+          verdict: supervisorResult.verdict,
+          reason: supervisorResult.reason,
+          rerouteToolName: supervisorResult.rerouteToolName,
+        }),
+      };
+    }
     return { blocked: false, params: args.params };
   }
 
@@ -359,9 +391,29 @@ export async function runBeforeToolCallHook(args: {
     }
 
     if (hookResult?.params) {
+      const mergedParams = mergeParamsWithApprovalOverrides(params, hookResult.params);
+      const supervisorResult = precheckToolCall({
+        toolName,
+        args: mergedParams,
+        sessionKey: args.ctx?.sessionKey,
+      });
+      if (
+        supervisorResult.verdict === "hard_fail" ||
+        supervisorResult.verdict === "refuse" ||
+        supervisorResult.verdict === "reroute"
+      ) {
+        return {
+          blocked: true,
+          reason: formatPrecheckBlockReason({
+            verdict: supervisorResult.verdict,
+            reason: supervisorResult.reason,
+            rerouteToolName: supervisorResult.rerouteToolName,
+          }),
+        };
+      }
       return {
         blocked: false,
-        params: mergeParamsWithApprovalOverrides(params, hookResult.params),
+        params: mergedParams,
       };
     }
   } catch (err) {
@@ -371,6 +423,26 @@ export async function runBeforeToolCallHook(args: {
     return {
       blocked: true,
       reason: BEFORE_TOOL_CALL_HOOK_FAILURE_REASON,
+    };
+  }
+
+  const supervisorResult = precheckToolCall({
+    toolName,
+    args: params,
+    sessionKey: args.ctx?.sessionKey,
+  });
+  if (
+    supervisorResult.verdict === "hard_fail" ||
+    supervisorResult.verdict === "refuse" ||
+    supervisorResult.verdict === "reroute"
+  ) {
+    return {
+      blocked: true,
+      reason: formatPrecheckBlockReason({
+        verdict: supervisorResult.verdict,
+        reason: supervisorResult.reason,
+        rerouteToolName: supervisorResult.rerouteToolName,
+      }),
     };
   }
 
