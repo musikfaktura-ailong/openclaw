@@ -1855,7 +1855,7 @@ TypeScript type: idiomatic adaptation of Python shape — `verdict` replaces `cl
 
 Tests: 5 tests — 3 in `tool-supervisor.test.ts` (hard fail, reroute, DB event), 2 integration tests at the seam in `pi-tools.before-tool-call.steward-precheck.test.ts` (blocks on hard fail, surfaces reroute reason).
 
-Non-structural notes: (1) `postcheck()` not in this slice — deferred before WS-B or WS-D consumes normalized tool artifacts; (2) `reroute` does not emit a DB event — not a spec violation but reroute redirections would be useful diagnostics; (3) `persistPrecheckEvent()` calls `getOrCreateStewardSession()` which creates a session row on every blocked precheck — correct behavior but creates sessions for tool calls that occur before any real session exists.
+Non-structural note: `postcheck()` (result normalization from `tool_supervisor.py`) not in this slice. Explicitly deferred — see "Not yet approved" below. `reroute` DB event gap fixed in same commit as review gate (reroute verdicts are diagnostically significant; `shouldPersistPrecheckEvent` extended to include `reroute`).
 
 No structural findings.
 
@@ -1874,13 +1874,12 @@ Current phase: **verify Workstream F**.
 Immediate next tasks:
 1. run `STEWARD2 VERIFY WS-F` — Codex runs targeted WS-F tests + seam regression tests + direct DB event inspection
 2. resolve BD-4 before the first LLM-dependent steward module starts
-3. resolve BD-4 before the first LLM-dependent steward module starts
-4. resolve BD-3 before Workstream G starts
-5. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
+3. resolve BD-3 before Workstream G starts
+4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
 - direct code port of downstream workstreams beyond the active Workstream F slice
-- replacement of OpenClaw session store as a whole; Workstream A uses DB authority plus JSON compatibility projection
+- `postcheck()` result normalization (from `tool_supervisor.py`): must be implemented as `src/steward/tool/postcheck-rules.ts` before Workstream B (truth audit) or Workstream D (consequence logic) consumes normalized tool output artifacts
 - any LLM-dependent steward module before `BD-4` is resolved
 - Workstream G before `BD-3` is resolved
 - Workstream D before `BD-8` is resolved, and Workstream D acceptance before `BD-6` is resolved

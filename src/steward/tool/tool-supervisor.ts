@@ -11,7 +11,8 @@ import {
 export type ToolSupervisorPrecheckResult = ToolPrecheckResult;
 
 function shouldPersistPrecheckEvent(verdict: PrecheckVerdict): boolean {
-  return verdict === "hard_fail" || verdict === "refuse";
+  // reroute included: misdirected tool calls are diagnostically significant
+  return verdict === "hard_fail" || verdict === "refuse" || verdict === "reroute";
 }
 
 function persistPrecheckEvent(params: {

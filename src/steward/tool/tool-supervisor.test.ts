@@ -31,6 +31,31 @@ describe("tool supervisor precheck", () => {
     expect(result.rerouteToolName).toBe("web_fetch");
   });
 
+  it("writes a DB event for reroute verdicts", () => {
+    initStewardDb(":memory:");
+
+    const result = precheckToolCall({
+      toolName: "exec",
+      args: { command: "curl https://example.com" },
+      sessionKey: "agent:main:webchat:direct:user-1",
+    });
+
+    expect(result.verdict).toBe("reroute");
+    const row = getDb()
+      .prepare(
+        `SELECT kind, data_json
+         FROM steward_events
+         WHERE kind = 'tool.precheck.blocked'
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get() as { kind: string; data_json: string };
+
+    expect(row.kind).toBe("tool.precheck.blocked");
+    expect(row.data_json).toContain("reroute");
+    expect(row.data_json).toContain("web_fetch");
+  });
+
   it("writes a DB event for deterministic hard-fail verdicts", () => {
     initStewardDb(":memory:");
 
