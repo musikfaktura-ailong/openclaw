@@ -1,0 +1,88 @@
+export type StewardRuntimeStatus = "idle" | "running" | "waiting" | "blocked";
+
+export type StewardSessionStatus = "open" | "closed";
+
+export type StewardFlowType = "research" | "maintenance" | "recovery" | "control";
+
+export type StewardFlowStatus =
+  | "running"
+  | "resumable"
+  | "blocked_transient"
+  | "blocked_deterministic"
+  | "completed";
+
+export type StewardFlowTaskRole = "primary" | "recovery" | "diagnostic";
+
+export type StewardFlowTaskLinkStatus = "pending" | "running" | "succeeded" | "failed";
+
+export type StewardBlockerType =
+  | "no_seedable_work"
+  | "blocked_transient"
+  | "time_exhausted"
+  | "operator_required";
+
+export type StewardBlockerStatus = "active" | "resolved";
+
+export type StewardEventKind =
+  | "session.created"
+  | "session.touched"
+  | "runtime.started"
+  | "runtime.idle"
+  | "flow.created"
+  | "flow.completed";
+
+export type StewardRuntimeStateRow = {
+  sessionKey: string;
+  status: StewardRuntimeStatus;
+  ownerPid: number | null;
+  activeFlowId: number | null;
+  activeTaskId: number | null;
+  heartbeatTs: number | null;
+  lastTransitionTs: number | null;
+  waitReason: string;
+  lastError: string;
+  version: number;
+  dataJson: string;
+};
+
+export type StewardSessionRow = {
+  id: string;
+  agentId: string;
+  channelKey: string;
+  createdTs: number;
+  lastActiveTs: number;
+  status: StewardSessionStatus;
+  dataJson: string;
+};
+
+export type StewardFlowRow = {
+  id: number;
+  sessionId: string;
+  flowType: StewardFlowType;
+  status: StewardFlowStatus;
+  stateJson: string;
+  ownerPid: number | null;
+  createdTs: number;
+  updatedTs: number;
+  heartbeatTs: number | null;
+};
+
+export type StewardFlowTaskRow = {
+  id: number;
+  flowId: number;
+  taskId: number;
+  role: StewardFlowTaskRole;
+  linkStatus: StewardFlowTaskLinkStatus;
+  createdTs: number;
+  updatedTs: number;
+};
+
+export type StewardEventRow = {
+  id: number;
+  ts: number;
+  sessionId: string | null;
+  flowId: number | null;
+  kind: string;
+  message: string;
+  dataJson: string;
+};

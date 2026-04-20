@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { loadSessionStore } from "../../config/sessions.js";
+import { closeStewardDb, resetDbForTest } from "../../steward/db/db-bootstrap.js";
 import type { EmbeddedPiRunResult } from "../pi-embedded.js";
 import { updateSessionStoreAfterAgentRun } from "./session-store.js";
 import { resolveSession } from "./session.js";
@@ -28,6 +29,8 @@ async function withTempSessionStore<T>(
   try {
     return await run({ dir, storePath: path.join(dir, "sessions.json") });
   } finally {
+    closeStewardDb();
+    resetDbForTest();
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
