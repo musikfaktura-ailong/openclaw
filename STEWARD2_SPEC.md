@@ -573,7 +573,7 @@ This board is the single glanceable source of implementation readiness.
 | B | Truth audit | `analyze` | `no` | depends on `A`, `G`; no local blocker beyond upstream readiness |
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
-| E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
+| E | Stewardship mission / operator hierarchy | `implement` | `yes` | phase 1 only (`stewardship-core.ts`) after `A` confirmation; `BD-4` still blocks the remaining LLM-scored modules |
 | F | Tool supervisor | `analyze` | `no` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
@@ -1830,22 +1830,47 @@ The revert of `session-projection.ts` in the verify commit is architecturally co
 
 All acceptance criteria satisfied: 4/4 WS-A integration tests pass; 12/12 OpenClaw seam regression tests pass; all BD-1/2/5/7 resolution requirements confirmed; no structural regressions; DB is the canonical runtime authority for all sessions.
 
+## Workstream E (phase 1) handoff record
+
+### Spec gate output
+Architect: phase 1 scope is limited to `src/steward/mission/stewardship-core.ts` and the prompt/policy seam that consumes it. This slice is allowed immediately after Workstream A confirmation. `BD-4` remains open for the LLM-scored Workstream E modules and does not block phase 1.
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/mission/stewardship-core.ts` as the direct PEQS stewardship-core port. Modified `src/agents/system-prompt.ts` so the steward mission preamble is injected by the shared runtime prompt builder used by both embedded and CLI paths. Modified `src/agents/system-prompt-report.ts` and `src/config/sessions/types.ts` so policy version/core hash/source hash are inspectable in persisted system-prompt reports. Added targeted tests in `src/agents/system-prompt.test.ts` and `src/agents/system-prompt-report.test.ts`.
+
+### Review gate output
+*Pending*
+
+### Verification gate output
+Verifier (Codex): targeted phase-1 verification passed.
+
+Verification evidence:
+- `corepack pnpm exec vitest run src/agents/system-prompt.test.ts src/agents/system-prompt-report.test.ts` — pass (`2` files, `67` tests)
+- prompt seam evidence: `buildAgentSystemPrompt()` now injects `## Stewardship Core` with policy version and the canonical PEQS-derived steward preamble in both full and minimal prompt modes
+- inspectability evidence: `buildSystemPromptReport()` now records steward policy metadata (`policyVersion`, `coreHash`, `sourceHash`, `injected`) in the persisted `systemPromptReport` payload
+
+Verdict: **PASS** for phase-1 implementation verification. Review and runtime evidence are still pending before Workstream E phase 1 can advance.
+
+### Advancement gate output
+*Pending*
+
 ---
 
 ## Current tasks
 
-Current phase: **Workstream A advance-ready; open next workstream**.
+Current phase: **implement Workstream E (phase 1: stewardship core)**.
 
 Immediate next tasks:
-1. merge `ws-a` into `main`
-2. resolve BD-4 before the first LLM-dependent steward module starts
-3. resolve BD-3 before Workstream G starts
-4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
-5. resolve BD-6 before Workstream D acceptance
+1. complete Review gate for Workstream E phase 1 on branch `ws-e-core`
+2. capture runtime evidence for one live turn showing steward core injection via the shared prompt seam
+3. resolve BD-4 before the first LLM-dependent steward module starts
+4. resolve BD-3 before Workstream G starts
+5. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
-- direct code port of downstream workstreams beyond Workstream A
+- direct code port of downstream workstreams beyond the active Workstream E phase-1 slice
 - replacement of OpenClaw session store as a whole; Workstream A uses DB authority plus JSON compatibility projection
+- any Workstream E module beyond `stewardship-core.ts` before `BD-4` is resolved
 - any LLM-dependent steward module before `BD-4` is resolved
 - Workstream G before `BD-3` is resolved
 - Workstream D before `BD-8` is resolved, and Workstream D acceptance before `BD-6` is resolved

@@ -7,8 +7,30 @@ import {
   buildAgentUserPromptPrefix,
   buildRuntimeLine,
 } from "./system-prompt.js";
+import {
+  promptPreamble as buildStewardPromptPreamble,
+  STEWARDSHIP_CORE_POLICY_VERSION,
+  STEWARDSHIP_HIERARCHY,
+} from "../steward/mission/stewardship-core.js";
 
 describe("buildAgentSystemPrompt", () => {
+  it("injects the steward mission core into full and minimal prompts", () => {
+    const fullPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+    });
+    const minimalPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      promptMode: "minimal",
+    });
+
+    for (const prompt of [fullPrompt, minimalPrompt]) {
+      expect(prompt).toContain("## Stewardship Core");
+      expect(prompt).toContain(`Policy version: ${STEWARDSHIP_CORE_POLICY_VERSION}`);
+      expect(prompt).toContain(buildStewardPromptPreamble());
+      expect(prompt).toContain(STEWARDSHIP_HIERARCHY);
+    }
+  });
+
   it("formats owner section for plain, hash, and missing owner lists", () => {
     const cases = typedCases<{
       name: string;
@@ -112,6 +134,7 @@ describe("buildAgentSystemPrompt", () => {
     });
 
     expect(prompt).not.toContain("## Authorized Senders");
+    expect(prompt).toContain("## Stewardship Core");
     // Skills are included even in minimal mode when skillsPrompt is provided (cron sessions need them)
     expect(prompt).toContain("## Skills");
     expect(prompt).not.toContain("## Memory Recall");
