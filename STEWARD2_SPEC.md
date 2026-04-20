@@ -575,7 +575,7 @@ This board is the single glanceable source of implementation readiness.
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
-| G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
+| G | Relationship memory / knowledge store | `analyze` | `yes` | resolved: `BD-3`; depends on `A` (confirmed) |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
 
 Interpretation:
@@ -1219,13 +1219,14 @@ ii-agent inspiration use:
 Steward2 target modules:
 - `src/steward/memory/relationship-memory.ts` — 8-type memory store with salience scoring; `recall()`, `store()`, `inject()`, `reinforceTruth()`
 - `src/steward/memory/memory-types.ts` — enum and weight constants for memory types
-- `src/steward/memory/knowledge-store.ts` — vector store backed by sqlite-vec or lancedb (decision required; see Blocking decisions); `store()`, `search()`, `retrieve_similar()`
+- `src/steward/memory/knowledge-store.ts` — vector store backed by `sqlite-vec`; `store(text, metadata, embedder?)`, `search(query, options?)`, `retrieveSimilar()`
+- `src/steward/memory/embedder.ts` — injectable embedder interface `(text: string) => Promise<Float32Array>`; SHA-256 deterministic fallback (dim=768, tags `fallback_embed: true`); LMStudio-compatible real embedder via `STEWARD_EMBED_URL` env var
 - `src/steward/memory/memory-schema.ts` — DB schema for `steward_knowledge` and `steward_memories` tables
 - `src/steward/memory/skills.ts` — extract and store successful tool sequences (memory_type=skill_sequence in `steward_knowledge`); Jaccard match for new task titles; skill context loader for prompt assembly
 
 Port shape:
 - relationship_memory is a direct port with OpenClaw session key as the primary identity anchor
-- knowledge store embedding strategy is a blocking decision (sqlite-vec vs lancedb, both present in OpenClaw deps); resolve before porting
+- vector store: `sqlite-vec` (resolved BD-3); embedder: injectable function with SHA-256 fallback default and LMStudio-compatible real embedder via `STEWARD_EMBED_URL`
 - proof_knowledge.py (Workstream C) is a specialization of knowledge store — do not duplicate; share the knowledge-store.ts module
 
 Responsibilities:
@@ -1240,7 +1241,7 @@ Dependencies:
 - must be in place before Workstream B (truth audit persistence), Workstream C (proof examples), and Workstream D (override event persistence)
 
 Blocking decision:
-- embedding strategy: OpenClaw has both `sqlite-vec` (0.1.9) and `@lancedb/lancedb` (^0.27.2) in deps; choose one as canonical vector store before implementation; do not use both
+- embedding strategy: resolved in BD-3 — `sqlite-vec` for storage; injectable embedder with SHA-256 deterministic fallback; real embedder via `STEWARD_EMBED_URL` (LMStudio `/v1/embeddings` compatible)
 
 Acceptance:
 - `recall(sessionKey, query, memoryType?)` returns salience-sorted entries from DB
@@ -1607,7 +1608,21 @@ OpenClaw already has two vector options in deps:
 
 Choose one as canonical. Do not use both. Embeddings must be generated somewhere — model or local embedder must be chosen.
 
-Decision: **OPEN**
+Decision: **RESOLVED**
+
+**Vector store: `sqlite-vec`.**
+Rationale: stays in `steward.db` — the single-DB authority established by WS-A; no separate process or file; already in deps (no new dependency); at the scale of this system (hundreds of entries for one operator) sqlite-vec's ANN is sufficient. `lancedb` rejected: separate columnar file + process contradicts single-DB ownership.
+
+PEQS note: `knowledge.py` uses plain SQLite BLOB + Python-side cosine with no vector extension. sqlite-vec is a direct upgrade of that approach — same DB, proper indexed vector search instead of full-table scan.
+
+**Embedding interface: injectable function `(text: string) => Promise<Float32Array>` with SHA-256 deterministic fallback.**
+Rationale: separates the storage concern (sqlite-vec) from the embedder concern (model selection). WS-G implements storage; the embedder is a pluggable dependency, not hardcoded.
+
+- Default embedder: deterministic SHA-256 fallback (same algorithm as PEQS `_deterministic_embed`), dim=768 — works offline with no model dependency; tagged as fallback in metadata (same as PEQS `fallback_embed: true`)
+- Configurable real embedder: LMStudio-compatible `/v1/embeddings` endpoint via `STEWARD_EMBED_URL` env var; model `text-embedding-nomic-embed-text-v1.5`, dim=768 — identical to PEQS; no new protocol to implement
+- Embedder resolution is independent of BD-4 (BD-4 is about LLM inference; BD-3 embedder is a separate local endpoint)
+
+Affected files: `src/steward/memory/knowledge-store.ts`, `src/steward/memory/embedder.ts` (new module owning embed interface + fallback + LMStudio client)
 
 ### BD-4. Model manager integration (blocks Workstreams C, D, E LLM calls)
 PEQS uses `model_manager.call(model_name, prompt, system)` against a local LMStudio instance. Steward2 must decide:
