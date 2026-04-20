@@ -1154,8 +1154,7 @@ PEQS source modules:
 - [core/tool_supervisor.py](C:\ai_agent\PEQS\core\tool_supervisor.py) — `precheck(tool, args)` validates before dispatch: research.web requires non-empty query; browser.fetch requires valid non-empty URL; code.run detects remote acquisition attempts (requests, urllib, socket, bs4); detects URL literals in code strings; knowledge.store requires non-empty text; returns classification: accept | hard_fail | retry | reroute | refuse
 
 OpenClaw target seams:
-- `src/agents/command/attempt-execution.runtime.ts` — tool execution entry point; supervisor precheck must run here, before consequence evaluation
-- node / tool dispatch layer
+- `src/agents/pi-tools.before-tool-call.ts` — `runBeforeToolCallHook()` / `wrapToolWithBeforeToolCallHook()` are the correct call sites; runs before every individual tool execution inside the existing host-owned before_tool_call wrapper; `attempt-execution.runtime.ts` is a re-export barrel, not the call site
 
 ii-agent donor references:
 - `src/ii_agent/agents/tools/base.py`
@@ -1165,13 +1164,14 @@ ii-agent inspiration use:
 - typed tool metadata, sandbox requirements, confirmation details, and stop-after-tool-call semantics
 
 Steward2 target modules:
-- `src/steward/tool/tool-supervisor.ts` — `precheck(tool, args)` returning `{verdict: accept|hard_fail|retry|reroute|refuse, reason: string}`
-- `src/steward/tool/precheck-rules.ts` — per-tool validation rules (extensible, not hardcoded per-tool inline)
+- `src/steward/tool/tool-supervisor.ts` — `precheckToolCall({toolName, args, sessionKey?})` returning `ToolSupervisorPrecheckResult`; emits DB event on `hard_fail` or `refuse`; safe fallback if DB not initialized
+- `src/steward/tool/precheck-rules.ts` — `PrecheckVerdict` union, `ToolPrecheckResult` and `ToolPrecheckIssue` types; `runToolPrecheckRules(toolName, rawArgs)` with extensible `RULES` array; uses OpenClaw-native tool IDs
 
 Port shape:
-- direct port of precheck rules, translated to TypeScript
-- classification returns structured verdict + reason, not just boolean
-- rules must be extensible for OpenClaw tool ids (PEQS uses internal tool strings; Steward2 must map to OpenClaw ids)
+- precheck rules ported from `tool_supervisor.py` and re-expressed with OpenClaw tool IDs (`web_search`, `web_fetch`, `exec`, `read`/`write`/`edit`, `apply_patch`) — do not use PEQS-internal IDs
+- TypeScript type is an idiomatic adaptation: `verdict` replaces `classification`, `rerouteToolName` makes rerouting explicit, Python-only fields (`report_type`, `ok`, `sanitized_args`) dropped as redundant in a typed language
+- `postcheck()` (result normalization) is not in WS-F scope; deferred to before WS-B or WS-D consumes normalized tool artifacts
+- unknown tool IDs pass precheck with `accept`; no PEQS-to-OpenClaw ID mapping needed
 
 Responsibilities:
 - validate tool arguments before consequence_simulator sees them
@@ -1843,7 +1843,21 @@ Local implementation evidence gathered during coding:
 - attempted to run existing `src/agents/pi-tools.before-tool-call.integration.e2e.test.ts`, but this repo's Vitest project config excludes `*.e2e.test.ts` from the active project selection; this is not claimed as verification evidence
 
 ### Review gate output
-*Pending*
+Reviewer (Claude): **PASS**. All structural requirements satisfied.
+
+Seam: `pi-tools.before-tool-call.ts` `runBeforeToolCallHook()` is the correct call site; precheck runs in all three branches (no plugin hooks, hooks with params, hooks post-approval) so every tool dispatch goes through it regardless of plugin configuration. `wrapToolWithBeforeToolCallHook()` is the wrapping point; blocks with thrown error on hard_fail/refuse/reroute.
+
+Rules: 5 rules using OpenClaw-native IDs (`web_search`, `web_fetch`, `exec`, `read`/`write`/`edit`, `apply_patch`). `NETWORK_ACQUISITION_RE` correctly extended to cover Windows PowerShell acquisition patterns not in the Python source. `RULES` array is extensible. Unknown tool IDs pass with `accept` as specified.
+
+DB event emission: `tool.precheck.blocked` event kind registered in schema; emitted on `hard_fail` and `refuse` only (not `reroute`) — matches spec. Safe `getDb()` try-catch prevents crash when DB is not initialized (correct for offline/test contexts).
+
+TypeScript type: idiomatic adaptation of Python shape — `verdict` replaces `classification`, `rerouteToolName` makes rerouting explicit, `sanitized_args`/`report_type`/`ok` dropped as redundant. This is correct per R17; spec has been updated to reflect it.
+
+Tests: 5 tests — 3 in `tool-supervisor.test.ts` (hard fail, reroute, DB event), 2 integration tests at the seam in `pi-tools.before-tool-call.steward-precheck.test.ts` (blocks on hard fail, surfaces reroute reason).
+
+Non-structural notes: (1) `postcheck()` not in this slice — deferred before WS-B or WS-D consumes normalized tool artifacts; (2) `reroute` does not emit a DB event — not a spec violation but reroute redirections would be useful diagnostics; (3) `persistPrecheckEvent()` calls `getOrCreateStewardSession()` which creates a session row on every blocked precheck — correct behavior but creates sessions for tool calls that occur before any real session exists.
+
+No structural findings.
 
 ### Verification gate output
 *Pending*
@@ -1855,11 +1869,11 @@ Local implementation evidence gathered during coding:
 
 ## Current tasks
 
-Current phase: **implement Workstream F**.
+Current phase: **verify Workstream F**.
 
 Immediate next tasks:
-1. review Workstream F against the invariant, donor fit, and the existing before-tool-call seam
-2. run the required verification set for Workstream F and inspect DB event artifacts directly
+1. run `STEWARD2 VERIFY WS-F` — Codex runs targeted WS-F tests + seam regression tests + direct DB event inspection
+2. resolve BD-4 before the first LLM-dependent steward module starts
 3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-3 before Workstream G starts
 5. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
