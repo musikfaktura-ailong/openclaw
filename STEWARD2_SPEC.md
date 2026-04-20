@@ -573,7 +573,7 @@ This board is the single glanceable source of implementation readiness.
 | B | Truth audit | `analyze` | `no` | depends on `A`, `G`; no local blocker beyond upstream readiness |
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
-| E | Stewardship mission / operator hierarchy | `implement` | `yes` | phase 1 only (`stewardship-core.ts`) after `A` confirmation; `BD-4` still blocks the remaining LLM-scored modules |
+| E | Stewardship mission / operator hierarchy | `confirm` | `yes` | phase 1 only (`stewardship-core.ts`) after `A` confirmation; `BD-4` still blocks the remaining LLM-scored modules |
 | F | Tool supervisor | `analyze` | `no` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
@@ -1109,7 +1109,7 @@ ii-agent inspiration use:
 
 Steward2 target modules:
 - `src/steward/mission/stewardship-core.ts` — `promptPreamble()`, `coreHash()`, `sourceHash()`, mission/truth/boundary/refusal/hierarchy/time constants
-- `src/steward/mission/operator-hierarchy.ts` — hierarchy enforcement logic; stewardship > research > revenue; task yields to mission, not the reverse
+- `src/steward/mission/operator-hierarchy.ts` — hierarchy rank constants derived from `stewardship.py` `_HIERARCHY` constant; exports `MissionRank` enum (STEWARDSHIP=1, RESEARCH=2, REVENUE=3), `MissionDomain` type, and `dominates(a, b)` function; no separate PEQS source file — logic is expressed in the _HIERARCHY preamble constant
 - `src/steward/mission/time-budget.ts` — two-mode penalty, bonus logic, VALIDATION_BONUS, KNOWLEDGE_MILESTONE_BONUS, TELEMETRY_BONUS, REJECTION_BURN; DB-backed time state via `steward_kv`
 - `src/steward/mission/task-value.ts` — task scoring + label adjudication; calls stewardship-reflection
 - `src/steward/mission/stewardship-reflection.ts` — post-task quality grader; 8 dimensions; busywork detection
@@ -1117,8 +1117,13 @@ Steward2 target modules:
 - `src/steward/mission/goals-registry.ts` — opportunity category registry; research phase templates; category diversity enforcement
 - `src/steward/mission/heuristics.ts` — temperament state machine; confidence/frustration/curiosity event handlers; `decayTick()`; prompt injection via `getPromptContext()`; `shouldForceResearch()` gate
 
+Phase scope:
+- **Phase 1** (after Workstream A confirmed): `stewardship-core.ts` + the prompt/policy seam that injects it; `operator-hierarchy.ts` is phase 2 (no PEQS source to port in isolation; hierarchy is expressed via preamble constants in stewardship-core.ts)
+- **Phase 2+** (blocked by `BD-4` and upstream G/A completion): all remaining modules
+
 Port shape:
 - `stewardship-core.ts` is a direct port (77 lines of constants + hashes); do this first, everything else imports it
+- injection into the OpenClaw system prompt seam is in phase 1 scope, not deferred
 - time/value logic must be redesigned to fit Steward2 runtime once DB authority is in place
 - stewardship_reflection is a required dependency of task-value — do not port task-value without it
 
@@ -1151,11 +1156,11 @@ Goal:
 - add a host-owned structural precheck gate before consequence logic and tool dispatch; validate tool arguments before any consequence evaluation or LLM classification runs
 
 PEQS source modules:
-- [core/tool_supervisor.py](C:\ai_agent\PEQS\core\tool_supervisor.py) — `precheck(tool, args)` validates before dispatch: research.web requires non-empty query; browser.fetch requires valid non-empty URL; code.run detects remote acquisition attempts (requests, urllib, socket, bs4); detects URL literals in code strings; knowledge.store requires non-empty text; returns classification: accept | hard_fail | retry | reroute | refuse
+- [core/tool_supervisor.py](C:\ai_agent\PEQS\core\tool_supervisor.py) — two functions: `precheck(tool, args)` validates arguments before dispatch; `postcheck(tool, args, result)` normalizes tool results into typed artifacts; precheck covers: research.web (non-empty query), browser.fetch (non-empty url), code.run (network acquisition detection, URL literals), knowledge.store (non-empty text); postcheck normalizes: research.web results into `search_result_set`, browser.fetch into `fetched_document`, code.run into `execution_report`, knowledge.store into `store_report`; both functions return a report object, not just a boolean
 
 OpenClaw target seams:
-- `src/agents/command/attempt-execution.runtime.ts` — tool execution entry point; supervisor precheck must run here, before consequence evaluation
-- node / tool dispatch layer
+- tool dispatch layer — precheck must run before any tool execution attempt; the exact call site requires inspecting `src/agents/command/attempt-execution.ts` to find where tool calls are dispatched; `attempt-execution.runtime.ts` is a re-export barrel and is NOT the call site
+- note: postcheck hooks at tool result normalization before result is returned to the agent
 
 ii-agent donor references:
 - `src/ii_agent/agents/tools/base.py`
@@ -1165,13 +1170,14 @@ ii-agent inspiration use:
 - typed tool metadata, sandbox requirements, confirmation details, and stop-after-tool-call semantics
 
 Steward2 target modules:
-- `src/steward/tool/tool-supervisor.ts` — `precheck(tool, args)` returning `{verdict: accept|hard_fail|retry|reroute|refuse, reason: string}`
-- `src/steward/tool/precheck-rules.ts` — per-tool validation rules (extensible, not hardcoded per-tool inline)
+- `src/steward/tool/tool-supervisor.ts` — `precheck(tool, args)` and `postcheck(tool, args, result)`; both return a report object matching the Python shape: `{ report_type, ok, classification, issues, sanitized_args }` for precheck and `{ report_type, ok, classification, issues, artifacts, result }` for postcheck; `classification` is one of `accept | hard_fail | retry | reroute | refuse`
+- `src/steward/tool/precheck-rules.ts` — per-tool validation rules for precheck and postcheck; extensible, not hardcoded inline
 
 Port shape:
-- direct port of precheck rules, translated to TypeScript
-- classification returns structured verdict + reason, not just boolean
-- rules must be extensible for OpenClaw tool ids (PEQS uses internal tool strings; Steward2 must map to OpenClaw ids)
+- direct port of both `precheck()` and `postcheck()` from `tool_supervisor.py`, translated to TypeScript
+- `postcheck()` is in scope for WS-F; it normalizes tool results before consequence evaluation in WS-D
+- report shape must match Python exactly so downstream workstreams (D, B) can rely on it without migration
+- PEQS tool IDs (`research.web`, `browser.fetch`, `code.run`, `knowledge.store`, `note.write`, `file.read`, `file.write`) are used as-is in WS-F; OpenClaw tool IDs will be mapped in WS-D alongside BD-8; unknown tool IDs pass precheck with `accept`
 
 Responsibilities:
 - validate tool arguments before consequence_simulator sees them
@@ -1839,7 +1845,11 @@ Architect: phase 1 scope is limited to `src/steward/mission/stewardship-core.ts`
 Implementer (Codex): created `src/steward/mission/stewardship-core.ts` as the direct PEQS stewardship-core port. Modified `src/agents/system-prompt.ts` so the steward mission preamble is injected by the shared runtime prompt builder used by both embedded and CLI paths. Modified `src/agents/system-prompt-report.ts` and `src/config/sessions/types.ts` so policy version/core hash/source hash are inspectable in persisted system-prompt reports. Added targeted tests in `src/agents/system-prompt.test.ts` and `src/agents/system-prompt-report.test.ts`.
 
 ### Review gate output
-*Pending*
+Reviewer (Claude): **PASS**. `stewardship-core.ts` is an exact port of `stewardship.py`: all 7 constants present, `stewardshipCoreLines()` order matches Python `core_lines()`, `promptPreamble()` correct, `coreHash()` and `sourceHash()` correct (`sourceHash` hashes the compiled JS via `import.meta.url` — architecturally equivalent to Python's `Path(__file__).read_bytes()`). Injection wired into `buildAgentSystemPrompt()` for full, minimal, and `"none"` modes. `SessionSystemPromptReport` extended with `steward` metadata field. All 67 tests pass.
+
+Non-structural note: `"none"` mode injects `promptPreamble()` without the `## Stewardship Core` section header — `report.steward.injected` returns `false` for none-mode prompts even though the preamble is present. Not a structural issue; `promptPreamble()` is injected in all modes as required.
+
+No structural findings.
 
 ### Verification gate output
 Verifier (Codex): targeted phase-1 verification passed.
