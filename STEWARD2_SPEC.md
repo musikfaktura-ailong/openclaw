@@ -574,7 +574,7 @@ This board is the single glanceable source of implementation readiness.
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
-| F | Tool supervisor | `confirm` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
+| F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
 
@@ -1871,18 +1871,20 @@ Verification evidence:
 Verdict: **PASS**. Workstream F acceptance evidence is satisfied for module/boundary/persistence/test/runtime categories. Workstream F is now in `confirm` state and is ready for an Advancement gate decision.
 
 ### Advancement gate output
-*Pending*
+Approver (User): **APPROVE TO ADVANCE**.
+
+Workstream F is approved. The next planned workstream remains `WS-G`, but `WS-G` cannot enter `implement` yet because blocker `BD-3` is still explicitly `OPEN`. This approval advances `WS-F` to `advance-ready`; it does not authorize `WS-G` code until `BD-3` is resolved in this spec.
 
 ---
 
 ## Current tasks
 
-Current phase: **Workstream F confirm-ready; await Advancement gate**.
+Current phase: **resolve BD-3 to open Workstream G**.
 
 Immediate next tasks:
-1. reviewer/approver records the Workstream F Advancement gate decision
-2. resolve BD-4 before the first LLM-dependent steward module starts
-3. resolve BD-3 before Workstream G starts
+1. resolve `BD-3` (knowledge store / embedding strategy) so `WS-G` can enter `implement`
+2. once `BD-3` is resolved, update the status board: `WS-G` → `implement`
+3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
