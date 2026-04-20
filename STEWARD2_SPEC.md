@@ -569,7 +569,7 @@ This board is the single glanceable source of implementation readiness.
 
 | Workstream | Name | Current state | Code-ready | Blocking decisions that must be closed first |
 | --- | --- | --- | --- | --- |
-| A | DB runtime authority | `implement` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
+| A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `analyze` | `no` | depends on `A`, `G`; no local blocker beyond upstream readiness |
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
@@ -1824,16 +1824,20 @@ Verification evidence:
 Verdict: **PASS**. WS-A acceptance evidence is satisfied; DB is authoritative for runtime state while `sessions.json` remains compatibility-valid for existing OpenClaw surfaces.
 
 ### Advancement gate output
-*Pending*
+Architect (Claude): **ADVANCE**.
+
+The revert of `session-projection.ts` in the verify commit is architecturally correct and supersedes review gate note #1. The steward SHA-256 session hash is an internal identity for `steward_sessions` row keying; the JSON `sessionId` is OpenClaw's conversation-continuity identifier. These are two deliberately separate identity systems coexisting in WS-A — unifying them is not in WS-A scope and would break OpenClaw lookups. Preserving existing JSON `sessionId` and backfilling only when absent is the correct compatibility projection behavior for all workstreams, not just WS-A.
+
+All acceptance criteria satisfied: 4/4 WS-A integration tests pass; 12/12 OpenClaw seam regression tests pass; all BD-1/2/5/7 resolution requirements confirmed; no structural regressions; DB is the canonical runtime authority for all sessions.
 
 ---
 
 ## Current tasks
 
-Current phase: **await Advancement gate for Workstream A**.
+Current phase: **Workstream A advance-ready; open next workstream**.
 
 Immediate next tasks:
-1. Claude reviews the WS-A verification evidence and records the Advancement gate decision
+1. merge `ws-a` into `main`
 2. resolve BD-4 before the first LLM-dependent steward module starts
 3. resolve BD-3 before Workstream G starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
