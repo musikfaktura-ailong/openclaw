@@ -9,6 +9,7 @@ import {
   recordSessionMetaFromInbound,
   updateLastRoute,
 } from "../sessions.js";
+import { closeStewardDb, resetDbForTest } from "../../steward/db/db-bootstrap.js";
 
 const CANONICAL_KEY = "agent:main:webchat:dm:mixed-user";
 const MIXED_CASE_KEY = "Agent:Main:WebChat:DM:MiXeD-User";
@@ -44,6 +45,8 @@ describe("session store key normalization", () => {
 
   afterEach(async () => {
     clearSessionStoreCacheForTest();
+    closeStewardDb();
+    resetDbForTest();
   });
 
   afterAll(async () => {

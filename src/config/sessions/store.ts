@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+// Seam: hooks after recordSessionMetaFromInbound in src/config/sessions/store.ts.
+// The steward layer injects DB-authoritative session/runtime state after the legacy OpenClaw write succeeds.
 import {
   acquireSessionWriteLock,
   resolveSessionLockMaxHoldFromTimeout,
@@ -48,6 +50,7 @@ import {
   mergeSessionEntryPreserveActivity,
   type SessionEntry,
 } from "./types.js";
+import { recordInboundTurnStart } from "../../steward/runtime/runtime-bridge.js";
 
 export {
   clearSessionStoreCacheForTest,
@@ -672,7 +675,7 @@ export async function recordSessionMetaFromInbound(params: {
 }): Promise<SessionEntry | null> {
   const { storePath, sessionKey, ctx } = params;
   const createIfMissing = params.createIfMissing ?? true;
-  return await updateSessionStore(
+  const recorded = await updateSessionStore(
     storePath,
     (store) => {
       const resolved = resolveSessionStoreEntry({ store, sessionKey });
@@ -708,6 +711,11 @@ export async function recordSessionMetaFromInbound(params: {
     },
     { activeSessionKey: normalizeStoreSessionKey(sessionKey) },
   );
+  await recordInboundTurnStart({
+    storePath,
+    sessionKey: normalizeStoreSessionKey(sessionKey),
+  });
+  return recorded;
 }
 
 export async function updateLastRoute(params: {

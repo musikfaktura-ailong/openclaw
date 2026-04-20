@@ -1,3 +1,5 @@
+// Seam: hooks after updateSessionStoreAfterAgentRun in src/agents/command/session-store.ts.
+// The steward layer marks the DB runtime idle and appends steward events after the legacy OpenClaw session update succeeds.
 import {
   mergeSessionEntry,
   setSessionRuntimeModel,
@@ -9,6 +11,7 @@ import { setCliSessionBinding, setCliSessionId } from "../cli-session.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { isCliProvider } from "../model-selection.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../usage.js";
+import { recordTurnComplete } from "../../steward/runtime/runtime-bridge.js";
 
 type RunResult = Awaited<ReturnType<(typeof import("../pi-embedded.js"))["runEmbeddedPiAgent"]>>;
 
@@ -144,4 +147,11 @@ export async function updateSessionStoreAfterAgentRun(params: {
     return merged;
   });
   sessionStore[sessionKey] = persisted;
+  await recordTurnComplete({
+    storePath,
+    sessionKey,
+    result: {
+      aborted: result.meta.aborted ?? false,
+    },
+  });
 }
