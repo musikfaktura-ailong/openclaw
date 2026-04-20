@@ -1894,11 +1894,11 @@ Workstream F is approved. The next planned workstream remains `WS-G`, but `WS-G`
 
 ## Current tasks
 
-Current phase: **resolve BD-3 to open Workstream G**.
+Current phase: **Workstream G code-ready; open implementation**.
 
 Immediate next tasks:
-1. resolve `BD-3` (knowledge store / embedding strategy) so `WS-G` can enter `implement`
-2. once `BD-3` is resolved, update the status board: `WS-G` → `implement`
+1. move `WS-G` from `analyze` to `implement` and open branch `ws-g`
+2. implement Workstream G against the resolved `BD-3` decision (`sqlite-vec` + injectable embedder)
 3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
@@ -1906,5 +1906,4 @@ Not yet approved:
 - direct code port of downstream workstreams beyond the active Workstream F slice
 - `postcheck()` result normalization (from `tool_supervisor.py`): must be implemented as `src/steward/tool/postcheck-rules.ts` before Workstream B (truth audit) or Workstream D (consequence logic) consumes normalized tool output artifacts
 - any LLM-dependent steward module before `BD-4` is resolved
-- Workstream G before `BD-3` is resolved
 - Workstream D before `BD-8` is resolved, and Workstream D acceptance before `BD-6` is resolved
