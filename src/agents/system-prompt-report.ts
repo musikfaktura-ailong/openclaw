@@ -1,5 +1,10 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { SessionSystemPromptReport } from "../config/sessions/types.js";
+import {
+  coreHash as getStewardCoreHash,
+  sourceHash as getStewardSourceHash,
+  STEWARDSHIP_CORE_POLICY_VERSION,
+} from "../steward/mission/stewardship-core.js";
 import { buildBootstrapInjectionStats } from "./bootstrap-budget.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 import type { WorkspaceBootstrapFile } from "./workspace.js";
@@ -107,6 +112,12 @@ export function buildSystemPromptReport(params: {
     bootstrapTotalMaxChars: params.bootstrapTotalMaxChars,
     ...(params.bootstrapTruncation ? { bootstrapTruncation: params.bootstrapTruncation } : {}),
     sandbox: params.sandbox,
+    steward: {
+      policyVersion: STEWARDSHIP_CORE_POLICY_VERSION,
+      coreHash: getStewardCoreHash(),
+      sourceHash: getStewardSourceHash(),
+      injected: systemPrompt.includes("## Stewardship Core"),
+    },
     systemPrompt: {
       chars: systemPrompt.length,
       projectContextChars,
