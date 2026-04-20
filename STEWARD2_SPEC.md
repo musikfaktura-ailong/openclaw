@@ -1798,17 +1798,39 @@ Why drop: trading-specific throughout. The sharpe/r_ratio/walk_forward bar, the 
 
 What to preserve: the three-LLM adjudication pattern (primary → critic → adjudicator, with retry logic and deterministic pre-filter before LLM tokens are spent) is a general proof review pattern. It is already captured in `proof_judge.py` and should be the model for Workstream C. No separate port needed.
 
+## Workstream A handoff record
+
+### Spec gate output
+Architect: invariant defined (canonical runtime readable from DB without session JSON), seam identified (recordSessionMetaFromInbound + updateSessionStoreAfterAgentRun), all four blockers BD-1/BD-2/BD-5/BD-7 resolved before implementation started.
+
+### Implementation gate output
+Implementer (Codex): modules created — `src/steward/db/` (runtime-db.ts, runtime-schema.ts, db-bootstrap.ts, tx.ts, migrations/0001_init.sql, migrations/runner.ts), `src/steward/runtime/` (runtime-state.ts, runtime-state-repo.ts, runtime-flow.ts, runtime-events.ts, runtime-bridge.ts, session-authority.ts, session-bridge.ts, session-projection.ts, ws-a.integration.test.ts). OpenClaw files modified — `src/agents/command/session-store.ts`, `src/config/sessions/store.ts`. Commit: `8f2bcccae3`.
+
+### Review gate output
+Reviewer (Claude): **PASS**. All 14 target modules present. Only the two named OpenClaw seam files modified. Schema exact match including `active_task_id` and `version`. BD-1/2/5/7 all correctly implemented. CAS pattern correct and tested. Seam headers and PEQS port attributions follow comment policy. Integration test covers schema migration, deterministic session ID, CAS stale-write rejection, and full inbound→complete cycle with direct DB row inspection.
+
+Non-structural notes: (1) `session-projection.ts` is create-only — sufficient for WS-A, will need extension in later workstreams. (2) `taskId = flowId` placeholder per spec. (3) `steward_runtime_state` row creation split between `getOrCreateStewardSession` and `getOrCreateRuntimeState` — correct but ownership worth consolidating later.
+
+No structural findings.
+
+### Verification gate output
+*Pending — awaiting `STEWARD2 VERIFY WS-A`*
+
+### Advancement gate output
+*Pending*
+
+---
+
 ## Current tasks
 
-Plan definition phase is complete. Current phase: **implement Workstream A**.
+Current phase: **verify Workstream A**.
 
 Immediate next tasks:
-1. create `src/steward/` directory namespace for Workstream A
-2. implement Workstream A per R18 and step gate requirements
-3. resolve BD-4 before the first LLM-dependent steward module starts
-4. resolve BD-3 before Workstream G starts
-5. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
-6. resolve BD-6 before Workstream D acceptance
+1. run `STEWARD2 VERIFY WS-A` — Codex runs OpenClaw regression suite + targeted WS-A tests + direct DB inspection
+2. resolve BD-4 before the first LLM-dependent steward module starts
+3. resolve BD-3 before Workstream G starts
+4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
+5. resolve BD-6 before Workstream D acceptance
 
 Not yet approved:
 - direct code port of downstream workstreams beyond Workstream A

@@ -10,7 +10,9 @@ export async function projectSessionToCompatibilityStore(params: {
   const updatedAt = params.updatedAt ?? Date.now();
   await updateSessionStore(params.storePath, (store) => {
     const existing = store[params.sessionKey];
-    if (existing) {
+    // Always align sessionId to the steward-authoritative value.
+    // If the entry already exists with the correct sessionId, no write is needed.
+    if (existing?.sessionId === params.stewardSessionId) {
       return existing;
     }
     const next: SessionEntry = mergeSessionEntry(existing, {
