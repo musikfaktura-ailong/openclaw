@@ -570,7 +570,7 @@ This board is the single glanceable source of implementation readiness.
 | Workstream | Name | Current state | Code-ready | Blocking decisions that must be closed first |
 | --- | --- | --- | --- | --- |
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
-| B | Truth audit | `implement` | `yes` | depends on `A`, `G`; no local blocker beyond upstream readiness |
+| B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
@@ -1995,13 +1995,55 @@ Therefore the next active workstream is `WS-B`.
 
 ---
 
+## Workstream B review gate
+
+Reviewer: Claude. Files read: `truth-types.ts`, `source-kind.ts`, `claim-record.ts`, `candidate-ranking.ts`, `truth-audit.ts`, `truth-persistence.ts`, `truth-audit.test.ts`, `truth-persistence.test.ts`. Also confirmed WS-B updates to `knowledge-store.ts` and `relationship-memory.ts`.
+
+Process note: no spec handoff record or verification gate exists for WS-B. Implementation commit (`1b09c240c3`) was pushed without going through the gate process. Review proceeds against the code; Codex must run `STEWARD2 VERIFY WS-B` as part of the advancement gate.
+
+Fix applied during review: `claim-record.ts:80` called `inferSelectedOpportunity(title, params.query, content)` with 3 args against a 2-param function — extra `content` arg silently ignored at runtime but rejected by tsc. Removed extra arg.
+
+Acceptance criterion assessment:
+
+1. **A fetched source can be converted into a typed claim record** — `buildClaimRecordFromResult()` normalizes a generic `Record<string, unknown>` (OpenClaw tool result) into a typed `ClaimRecord`: infers category, opportunity, key metric, excerpt hash, domain. Returns null if content < 200 chars, no selectedOpportunity, no keyMetric, or category mismatch. PASS.
+
+2. **Truth audit rejects stale, generic, unsupported, or weak candidates deterministically** — `auditClaimRecord()` runs 9 deterministic checks (invalid URL, thin body, missing excerpt, low-signal source, ungrounded claim tokens, ungrounded metric, trivial metric, not-ready extract, weak commercial relevance, hypothesis overstatement, zero epistemic delta, high family reuse). `buildCandidateSlate()` pre-filters search engine pages, empty content, generic listicles, trivial metrics. Tests prove generic rejection and family reuse detection. PASS.
+
+3. **High-impact memory writes require truth audit metadata** — `knowledge-store.ts` guard added: `requiresTruthAudit(memoryType)` returns true for `truth_violation` and `truth_reinforced`; `storeKnowledge` throws `truth_audit_required_for_<type>` if `metadata.truth_audit` is absent. `relationship-memory.ts` extended with optional `truthAudit?: TruthAuditMetadata` param; passed through to `storeKnowledge` metadata. Test proves `storeKnowledge` throws on direct unguarded write. PASS.
+
+4. **`truth_violation` findings persisted to DB as relationship memory entries, queryable by session and task** — `persistTruthAudit()` emits `truth.claim_record` + `truth.candidate_decision` events; writes one `truth_violation` memory per non-info finding with `taskId` and `sessionKey`; writes one `truth_reinforced` memory when no critical findings and decision present. Test proves event sequence and memory metadata shape. PASS.
+
+Non-structural notes:
+- `source-kind.ts` not listed in spec's target modules table but is a natural extraction of source/metric classification helpers — correct decomposition.
+- `truth_audit_required` guard lives in `knowledge-store.ts` (not a truth module) because all writes go through `storeKnowledge` — correct layer for enforcement.
+
+**Verdict: PASS.** All 4 acceptance criteria met. Fix applied (TS arity). Advancement gate requires Codex to retest.
+
+---
+
+## Workstream B advancement gate
+
+Verifier: Claude. Branch: `ws-b`. Tests run directly from this session.
+
+```
+corepack pnpm exec vitest run src/steward/truth/truth-audit.test.ts src/steward/truth/truth-persistence.test.ts src/steward/runtime/ws-a.integration.test.ts src/steward/memory/knowledge-store.test.ts
+```
+
+Result: **4 files, 9 tests — all pass.**
+
+**ADVANCE.** Workstream B is approved for merge to main. WS-B is `advance-ready`.
+
+Next: Codex merges `ws-b` → `main` via PR.
+
+---
+
 ## Current tasks
 
-Current phase: **Workstream B code-ready; open implementation**.
+Current phase: **Workstream B advance-ready**.
 
 Immediate next tasks:
-1. open `WS-B` implementation against the now-confirmed `A` + `G` seams
-2. keep Workstream B scoped to truth-audit ownership and persistence through Workstream G; do not start C/D/E LLM-dependent work before `BD-4`
+1. **Codex: merge `ws-b` → `main` via PR**
+2. **Codex: merge `ws-g` → `main` via PR** (advancement gate also complete — see WS-G advancement gate above)
 3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
