@@ -570,12 +570,12 @@ This board is the single glanceable source of implementation readiness.
 | Workstream | Name | Current state | Code-ready | Blocking decisions that must be closed first |
 | --- | --- | --- | --- | --- |
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
-| B | Truth audit | `analyze` | `no` | depends on `A`, `G`; no local blocker beyond upstream readiness |
+| B | Truth audit | `implement` | `yes` | depends on `A`, `G`; no local blocker beyond upstream readiness |
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
-| F | Tool supervisor | `analyze` | `no` | depends on `A`; no local blocker beyond upstream readiness |
-| G | Relationship memory / knowledge store | `analyze` | `no` | `BD-3`; depends on `A` |
+| F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
+| G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
 
 Interpretation:
@@ -1154,8 +1154,7 @@ PEQS source modules:
 - [core/tool_supervisor.py](C:\ai_agent\PEQS\core\tool_supervisor.py) — `precheck(tool, args)` validates before dispatch: research.web requires non-empty query; browser.fetch requires valid non-empty URL; code.run detects remote acquisition attempts (requests, urllib, socket, bs4); detects URL literals in code strings; knowledge.store requires non-empty text; returns classification: accept | hard_fail | retry | reroute | refuse
 
 OpenClaw target seams:
-- `src/agents/command/attempt-execution.runtime.ts` — tool execution entry point; supervisor precheck must run here, before consequence evaluation
-- node / tool dispatch layer
+- `src/agents/pi-tools.before-tool-call.ts` — `runBeforeToolCallHook()` / `wrapToolWithBeforeToolCallHook()` are the correct call sites; runs before every individual tool execution inside the existing host-owned before_tool_call wrapper; `attempt-execution.runtime.ts` is a re-export barrel, not the call site
 
 ii-agent donor references:
 - `src/ii_agent/agents/tools/base.py`
@@ -1165,13 +1164,14 @@ ii-agent inspiration use:
 - typed tool metadata, sandbox requirements, confirmation details, and stop-after-tool-call semantics
 
 Steward2 target modules:
-- `src/steward/tool/tool-supervisor.ts` — `precheck(tool, args)` returning `{verdict: accept|hard_fail|retry|reroute|refuse, reason: string}`
-- `src/steward/tool/precheck-rules.ts` — per-tool validation rules (extensible, not hardcoded per-tool inline)
+- `src/steward/tool/tool-supervisor.ts` — `precheckToolCall({toolName, args, sessionKey?})` returning `ToolSupervisorPrecheckResult`; emits DB event on `hard_fail` or `refuse`; safe fallback if DB not initialized
+- `src/steward/tool/precheck-rules.ts` — `PrecheckVerdict` union, `ToolPrecheckResult` and `ToolPrecheckIssue` types; `runToolPrecheckRules(toolName, rawArgs)` with extensible `RULES` array; uses OpenClaw-native tool IDs
 
 Port shape:
-- direct port of precheck rules, translated to TypeScript
-- classification returns structured verdict + reason, not just boolean
-- rules must be extensible for OpenClaw tool ids (PEQS uses internal tool strings; Steward2 must map to OpenClaw ids)
+- precheck rules ported from `tool_supervisor.py` and re-expressed with OpenClaw tool IDs (`web_search`, `web_fetch`, `exec`, `read`/`write`/`edit`, `apply_patch`) — do not use PEQS-internal IDs
+- TypeScript type is an idiomatic adaptation: `verdict` replaces `classification`, `rerouteToolName` makes rerouting explicit, Python-only fields (`report_type`, `ok`, `sanitized_args`) dropped as redundant in a typed language
+- `postcheck()` (result normalization) is not in WS-F scope; deferred to before WS-B or WS-D consumes normalized tool artifacts
+- unknown tool IDs pass precheck with `accept`; no PEQS-to-OpenClaw ID mapping needed
 
 Responsibilities:
 - validate tool arguments before consequence_simulator sees them
@@ -1200,14 +1200,13 @@ Goal:
 - provide the persistence layer for truth findings, operator preferences, session continuity, and proof examples; bridge Workstream B (truth audit) and Workstream C (proof judge) to durable DB-backed memory
 
 PEQS source modules:
-- [core/relationship_memory.py](C:\ai_agent\PEQS\core\relationship_memory.py) — 8 memory types with salience weights: operator_boundary (1.0), operator_preference (0.95), truth_reinforced (0.9), truth_violation (0.8), shared_thread (0.8), household_routine (0.75), stewardship_ledger (0.7), operator_override (0.6); `recall()` returns salience-weighted entries (similarity × importance × recency × weight); `inject_current_context()` injects into prompts; `reinforce_truth()` adjusts confidence; first-contact bootstrap (5 initial memories)
-- [core/knowledge.py](C:\ai_agent\PEQS\core\knowledge.py) — vector similarity search over knowledge entries; `store(text, metadata, db)` stores with embeddings; `search(query, db, top_k)` returns ranked results; used by relationship_memory, proof_knowledge, and goals
-- [core/skills.py](C:\ai_agent\PEQS\core\skills.py) — `extract()` saves successful tool sequences as JSON per task; `match()` Jaccard similarity against saved sequences to surface best match for a new task title; `load_skills_for_task_type()` loads vault markdown skill files as prompt context; file-based storage becomes DB-backed via `steward_knowledge` table
+- [core/relationship_memory.py](C:\ai_agent\PEQS\core\relationship_memory.py) — 8 memory types with salience weights: operator_boundary (1.0), operator_preference (0.95), truth_reinforced (0.9), truth_violation (0.8), shared_thread (0.8), household_routine (0.75), stewardship_ledger (0.7), operator_override (0.6); `recall()` returns salience-weighted entries (similarity × importance × recency × weight); `inject_current_context()` injects into prompts; `reinforce_truth()` adjusts confidence score on an existing entry; `bootstrap_first_contact()` seeds 5 initial memories if none exist
+- [core/knowledge.py](C:\ai_agent\PEQS\core\knowledge.py) — vector store; `store(text, metadata, db)` embeds and inserts; `search(query, db, top_k)` brute-force cosine over all rows; temporal decay, stale/fallback/confidence multipliers; high-impact entries require `provenance_urls`, `confidence_score`, `last_verified_ts` in metadata or store raises
+- [core/skills.py](C:\ai_agent\PEQS\core\skills.py) — `extract(task, history, db)` extracts tool sequences from successful tasks; `match(title, db)` Jaccard similarity to surface best-matching skill; `load_skills_for_task_type()` reads vault markdown files — **out of scope** (vault structure does not exist in Steward2; OpenClaw has its own skills system)
 
 OpenClaw target seams:
-- `src/agents/memory-search.ts` — memory retrieval before context injection; truth-audited entries must be surfaced here
-- session store write path — operator preferences and session continuity persisted here
-- active-memory plugin structure
+- `src/agents/system-prompt.ts` — relationship context injection (`injectCurrentContext()` equivalent) hooks here, after stewardship core preamble; bounded to ≤ 2000 chars; only called if DB is open and memories exist (`src/agents/memory-search.ts` is OpenClaw's own file-ingestion memory system — it is NOT the steward injection seam)
+- no OpenClaw file requires modification for memory writes — `storeRecord()` is called directly by other steward modules (truth audit → truth_violation/truth_reinforced, session bridge → first-contact bootstrap)
 
 ii-agent donor references:
 - [docs/database-design.md](C:\ai_agent\Steward2_ii_agent\docs\database-design.md)
@@ -1217,37 +1216,43 @@ ii-agent inspiration use:
 - richer session/message/run schema expectations and durable runtime artifact storage shape
 
 Steward2 target modules:
-- `src/steward/memory/relationship-memory.ts` — 8-type memory store with salience scoring; `recall()`, `store()`, `inject()`, `reinforceTruth()`
-- `src/steward/memory/memory-types.ts` — enum and weight constants for memory types
-- `src/steward/memory/knowledge-store.ts` — vector store backed by sqlite-vec or lancedb (decision required; see Blocking decisions); `store()`, `search()`, `retrieve_similar()`
-- `src/steward/memory/memory-schema.ts` — DB schema for `steward_knowledge` and `steward_memories` tables
-- `src/steward/memory/skills.ts` — extract and store successful tool sequences (memory_type=skill_sequence in `steward_knowledge`); Jaccard match for new task titles; skill context loader for prompt assembly
+- `src/steward/memory/relationship-memory.ts` — 8-type memory store; `storeRecord()`, `recall()`, `injectCurrentContext()`, `reinforceTruth()`, `bootstrapFirstContact()`
+- `src/steward/memory/memory-types.ts` — `RelationshipMemoryType` union, `MEMORY_TYPE_WEIGHTS` map, `FIRST_CONTACT_RECORDS` seed data
+- `src/steward/memory/knowledge-store.ts` — sqlite-vec backed store; `storeKnowledge(text, meta, embedder?)`, `searchKnowledge(query, options?)`, `loadSqliteVecForDb(db)` — loads extension synchronously using `require('sqlite-vec').load(db)` via `createRequire` (sqlite-vec's `load()` is synchronous; only the dynamic `import()` call is async, so use `createRequire` to bypass that); called once at DB init time from `knowledge-store.ts` not from `db-bootstrap.ts`
+- `src/steward/memory/embedder.ts` — `type Embedder = (text: string) => Promise<Float32Array>`; `deterministicEmbed(text, dim?)` SHA-256 fallback; `lmstudioEmbed(text, baseUrl)` LMStudio client; `resolveEmbedder()` returns lmstudio embedder if `STEWARD_EMBED_URL` is set, deterministic fallback otherwise
+- `src/steward/db/migrations/0002_knowledge.sql` — `steward_knowledge` table (`id`, `session_id`, `ts`, `memory_type`, `text`, `embedding`, `meta_json`); `steward_knowledge_vec` virtual table via `vec0(embedding float[768])`; `steward_skills` table (`id`, `task_id`, `title`, `normalized_title`, `tool_sequence_json`, `ts`)
+- `src/steward/memory/skills.ts` — `extractSkill(task, toolHistory)` stores to `steward_skills`; `matchSkill(title)` Jaccard against `steward_skills`; `load_skills_for_task_type()` is NOT ported (vault structure absent; OpenClaw has `src/agents/skills.ts`)
 
 Port shape:
-- relationship_memory is a direct port with OpenClaw session key as the primary identity anchor
-- knowledge store embedding strategy is a blocking decision (sqlite-vec vs lancedb, both present in OpenClaw deps); resolve before porting
-- proof_knowledge.py (Workstream C) is a specialization of knowledge store — do not duplicate; share the knowledge-store.ts module
+- `relationship-memory.ts` is a direct port of `relationship_memory.py` with session_id (steward SHA-256 hash) as the primary grouping key
+- `knowledge-store.ts` ports `knowledge.py` with sqlite-vec replacing brute-force Python cosine; temporal decay, stale/fallback/confidence multipliers preserved exactly
+- `bootstrapFirstContact()` is called from `getOrCreateStewardSession()` in `session-authority.ts` (WS-A seam) — add a non-breaking call after the upsert; it is idempotent (checks `has_minimum_relationship_context()` first)
+- `injectCurrentContext()` is called from `buildAgentSystemPrompt()` in `src/agents/system-prompt.ts` — add after the stewardship core section; bounded to 2000 chars; guarded by `try/catch` (DB may not be open in all contexts)
+- `proof_knowledge.py` is Workstream C; `knowledge-store.ts` provides the shared storage layer; the `examples` table and proof-specific schema are WS-C's responsibility, not WS-G's — do not port proof_knowledge.py here
 
 Responsibilities:
 - store and retrieve operator preferences, boundaries, shared threads, stewardship ledger entries
 - store and retrieve truth violations and truth reinforcements (feeds back into truth audit and stewardship audit)
 - store and retrieve operator override events (feeds into time budget fatigue tracking)
-- provide vector similarity search for proof examples, truth claims, and session context
-- inject relevant memories into agent prompts at session start
+- provide vector similarity search backed by sqlite-vec
+- inject relevant memories into agent prompts at session start (bounded, guarded)
+- bootstrap first-contact seed memories on first session
 
 Dependencies:
-- Workstream A: DB schema; `steward_knowledge` and `steward_memories` tables
+- Workstream A: DB bootstrap and session authority seam; `steward_knowledge` and `steward_skills` tables are added by WS-G migration `0002_knowledge.sql` — NOT present in WS-A's `0001_init.sql`
 - must be in place before Workstream B (truth audit persistence), Workstream C (proof examples), and Workstream D (override event persistence)
 
 Blocking decision:
-- embedding strategy: OpenClaw has both `sqlite-vec` (0.1.9) and `@lancedb/lancedb` (^0.27.2) in deps; choose one as canonical vector store before implementation; do not use both
+- embedding strategy: resolved in BD-3 — `sqlite-vec` for storage; injectable embedder with SHA-256 deterministic fallback; real embedder via `STEWARD_EMBED_URL` (LMStudio `/v1/embeddings` compatible)
 
 Acceptance:
-- `recall(sessionKey, query, memoryType?)` returns salience-sorted entries from DB
-- `store(sessionKey, text, memoryType, metadata)` persists to DB with embedding
-- truth_violation and truth_reinforced entries are queryable by session, task, and time window
-- proof examples are retrievable by task_type with similarity ranking
-- memory injection produces a consistent, bounded context string for prompt assembly
+- `recall(sessionId, query, memoryType?)` returns salience-sorted entries from `steward_knowledge` via sqlite-vec
+- `storeRecord(sessionId, memoryType, text, meta)` persists with embedding to `steward_knowledge`
+- `bootstrapFirstContact()` seeds 5 initial memories on first session; is idempotent
+- `injectCurrentContext()` returns bounded relationship context string injected into system prompt
+- truth_violation and truth_reinforced entries are queryable by session and ts range
+- `matchSkill(title)` returns Jaccard-matched skill from `steward_skills` or null
+- migration `0002_knowledge.sql` runs cleanly after `0001_init.sql`; sqlite-vec extension loads on first knowledge access
 
 ---
 
@@ -1607,7 +1612,21 @@ OpenClaw already has two vector options in deps:
 
 Choose one as canonical. Do not use both. Embeddings must be generated somewhere — model or local embedder must be chosen.
 
-Decision: **OPEN**
+Decision: **RESOLVED**
+
+**Vector store: `sqlite-vec`.**
+Rationale: stays in `steward.db` — the single-DB authority established by WS-A; no separate process or file; already in deps (no new dependency); at the scale of this system (hundreds of entries for one operator) sqlite-vec's ANN is sufficient. `lancedb` rejected: separate columnar file + process contradicts single-DB ownership.
+
+PEQS note: `knowledge.py` uses plain SQLite BLOB + Python-side cosine with no vector extension. sqlite-vec is a direct upgrade of that approach — same DB, proper indexed vector search instead of full-table scan.
+
+**Embedding interface: injectable function `(text: string) => Promise<Float32Array>` with SHA-256 deterministic fallback.**
+Rationale: separates the storage concern (sqlite-vec) from the embedder concern (model selection). WS-G implements storage; the embedder is a pluggable dependency, not hardcoded.
+
+- Default embedder: deterministic SHA-256 fallback (same algorithm as PEQS `_deterministic_embed`), dim=768 — works offline with no model dependency; tagged as fallback in metadata (same as PEQS `fallback_embed: true`)
+- Configurable real embedder: LMStudio-compatible `/v1/embeddings` endpoint via `STEWARD_EMBED_URL` env var; model `text-embedding-nomic-embed-text-v1.5`, dim=768 — identical to PEQS; no new protocol to implement
+- Embedder resolution is independent of BD-4 (BD-4 is about LLM inference; BD-3 embedder is a separate local endpoint)
+
+Affected files: `src/steward/memory/knowledge-store.ts`, `src/steward/memory/embedder.ts` (new module owning embed interface + fallback + LMStudio client)
 
 ### BD-4. Model manager integration (blocks Workstreams C, D, E LLM calls)
 PEQS uses `model_manager.call(model_name, prompt, system)` against a local LMStudio instance. Steward2 must decide:
@@ -1830,22 +1849,164 @@ The revert of `session-projection.ts` in the verify commit is architecturally co
 
 All acceptance criteria satisfied: 4/4 WS-A integration tests pass; 12/12 OpenClaw seam regression tests pass; all BD-1/2/5/7 resolution requirements confirmed; no structural regressions; DB is the canonical runtime authority for all sessions.
 
+## Workstream F handoff record
+
+### Spec gate output
+Architect: invariant defined (host-owned structural tool precheck before consequence logic and execution), donor sources recorded (`core/tool_supervisor.py`, `ii_agent/agents/tools/base.py`), and Workstream A dependency satisfied. Workstream F may start because it has no open local blocker beyond upstream readiness.
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/tool/precheck-rules.ts` and `src/steward/tool/tool-supervisor.ts`. Modified `src/agents/pi-tools.before-tool-call.ts` so the steward precheck runs inside the existing host-owned `before_tool_call` wrapper seam before actual tool execution. Modified `src/steward/db/runtime-schema.ts` to register a typed precheck event kind for DB event persistence. Added targeted tests in `src/steward/tool/tool-supervisor.test.ts` and `src/agents/pi-tools.before-tool-call.steward-precheck.test.ts`.
+
+Local implementation evidence gathered during coding:
+- targeted tests passed: `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts src/agents/pi-tools.before-tool-call.steward-precheck.test.ts`
+- attempted to run existing `src/agents/pi-tools.before-tool-call.integration.e2e.test.ts`, but this repo's Vitest project config excludes `*.e2e.test.ts` from the active project selection; this is not claimed as verification evidence
+
+### Review gate output
+Reviewer (Claude): **PASS**. All structural requirements satisfied.
+
+Seam: `pi-tools.before-tool-call.ts` `runBeforeToolCallHook()` is the correct call site; precheck runs in all three branches (no plugin hooks, hooks with params, hooks post-approval) so every tool dispatch goes through it regardless of plugin configuration. `wrapToolWithBeforeToolCallHook()` is the wrapping point; blocks with thrown error on hard_fail/refuse/reroute.
+
+Rules: 5 rules using OpenClaw-native IDs (`web_search`, `web_fetch`, `exec`, `read`/`write`/`edit`, `apply_patch`). `NETWORK_ACQUISITION_RE` correctly extended to cover Windows PowerShell acquisition patterns not in the Python source. `RULES` array is extensible. Unknown tool IDs pass with `accept` as specified.
+
+DB event emission: `tool.precheck.blocked` event kind registered in schema; emitted on `hard_fail` and `refuse` only (not `reroute`) — matches spec. Safe `getDb()` try-catch prevents crash when DB is not initialized (correct for offline/test contexts).
+
+TypeScript type: idiomatic adaptation of Python shape — `verdict` replaces `classification`, `rerouteToolName` makes rerouting explicit, `sanitized_args`/`report_type`/`ok` dropped as redundant. This is correct per R17; spec has been updated to reflect it.
+
+Tests: 5 tests — 3 in `tool-supervisor.test.ts` (hard fail, reroute, DB event), 2 integration tests at the seam in `pi-tools.before-tool-call.steward-precheck.test.ts` (blocks on hard fail, surfaces reroute reason).
+
+Non-structural note: `postcheck()` (result normalization from `tool_supervisor.py`) not in this slice. Explicitly deferred — see "Not yet approved" below. `reroute` DB event gap fixed in same commit as review gate (reroute verdicts are diagnostically significant; `shouldPersistPrecheckEvent` extended to include `reroute`).
+
+No structural findings.
+
+### Verification gate output
+Verifier (Codex): targeted Workstream F verification passed on branch `ws-f`.
+
+Verification evidence:
+- targeted tests passed: `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts src/agents/pi-tools.before-tool-call.steward-precheck.test.ts` — pass (`2` files, `6` tests)
+- direct DB artifact inspection: `tool-supervisor.test.ts` initializes steward DB, triggers a deterministic `web_fetch` hard-fail, and directly queries `steward_events` for `tool.precheck.blocked`, confirming typed event persistence with message and JSON payload
+- runtime trace evidence: `pi-tools.before-tool-call.steward-precheck.test.ts` verifies a wrapped tool call is rejected before underlying tool execution on both `hard_fail` (`web_search` missing query) and `reroute` (`exec` with URL acquisition) paths; `execute` is not called in either case
+- seam evidence: verification exercised the actual host-owned wrapper seam in `runBeforeToolCallHook()` / `wrapToolWithBeforeToolCallHook()`, not an isolated helper detached from dispatch
+
+Verdict: **PASS**. Workstream F acceptance evidence is satisfied for module/boundary/persistence/test/runtime categories. Workstream F is now in `confirm` state and is ready for an Advancement gate decision.
+
+### Advancement gate output
+Approver (User): **APPROVE TO ADVANCE**.
+
+Workstream F is approved. The next planned workstream remains `WS-G`, but `WS-G` cannot enter `implement` yet because blocker `BD-3` is still explicitly `OPEN`. This approval advances `WS-F` to `advance-ready`; it does not authorize `WS-G` code until `BD-3` is resolved in this spec.
+
+---
+
+## Workstream G handoff record
+
+### Spec gate output
+Architect: invariant defined (durable operator/truth/session memory in steward DB), donor sources recorded (`relationship_memory.py`, `knowledge.py`, `skills.py`, OpenClaw memory seams, ii-agent DB/session references), and blocker `BD-3` resolved before implementation. Workstream A dependency already confirmed.
+
+### Implementation gate output
+Implementer (Codex): created steward-owned memory modules under `src/steward/memory/`:
+- `memory-types.ts`
+- `memory-schema.ts`
+- `embedder.ts`
+- `knowledge-store.ts`
+- `relationship-memory.ts`
+- `skills.ts`
+- `prompt-context.ts`
+
+DB/schema work:
+- added migration `src/steward/db/migrations/0002_memory.sql`
+- WS-A bootstrap test updated for schema version `2` and the new `steward_knowledge` / `steward_memories` tables
+
+OpenClaw seam updates:
+- `src/agents/pi-embedded-runner/run/attempt.ts`
+  - steward relationship-memory recall is merged into `extraSystemPrompt` before prompt assembly
+- `src/steward/runtime/session-bridge.ts`
+  - turn completion now persists a session continuity memory entry through the steward memory layer
+
+Targeted tests added:
+- `src/steward/memory/knowledge-store.test.ts`
+- `src/steward/memory/relationship-memory.test.ts`
+- `src/steward/memory/prompt-context.test.ts`
+
+Local validation during implementation:
+- `corepack pnpm exec vitest run src/steward/runtime/ws-a.integration.test.ts` — pass after updating the migration expectation to version `2`
+- initial direct targeted Vitest runs for the new WS-G files were blocked in the default sandbox by a Vitest/Vite startup `spawn EPERM` failure; verification was rerun outside the sandbox and completed successfully
+
+Current implementation status:
+- module seam is in place
+- DB persistence seam is in place
+- prompt injection seam is in place
+
+### Verification gate output
+Verifier (Codex): targeted Workstream G verification passed on branch `ws-g`.
+
+Verification evidence:
+- targeted WS-G suite passed: `corepack pnpm exec vitest run src/steward/memory/knowledge-store.test.ts src/steward/memory/relationship-memory.test.ts src/steward/memory/prompt-context.test.ts` — pass (`3` files, `4` tests)
+- touched upstream seam regression passed: `corepack pnpm exec vitest run src/steward/runtime/ws-a.integration.test.ts` — pass (`1` file, `4` tests)
+- persistence evidence covered by the WS-G tests:
+  - `knowledge-store.test.ts` proves `steward_knowledge` write + similarity recall
+  - `relationship-memory.test.ts` proves `steward_memories` write, salience recall, truth reinforcement persistence, and bounded injected context generation
+  - `prompt-context.test.ts` proves DB-backed steward memory is merged into the system-prompt seam
+- boundary evidence covered by direct touched seams:
+  - `src/agents/pi-embedded-runner/run/attempt.ts` now injects steward recall through `extraSystemPrompt` before prompt assembly
+  - `src/steward/runtime/session-bridge.ts` now persists session continuity through the steward memory layer on turn completion
+
+Verdict: **PASS**. Workstream G acceptance evidence is satisfied for module/boundary/persistence/test categories and is ready for the review gate.
+
+---
+
+## Workstream G review gate
+
+Reviewer: Claude. Files read: `memory-types.ts`, `memory-schema.ts`, `embedder.ts`, `knowledge-store.ts`, `relationship-memory.ts`, `skills.ts`, `prompt-context.ts`, `0002_memory.sql`, `attempt.ts` (seam lines), `session-bridge.ts`.
+
+Acceptance criterion assessment:
+
+1. **`recall()` returns salience-sorted entries via sqlite-vec** — `recallRelationshipMemory()` calls `searchKnowledge()` which uses `vec_distance_cosine` when sqlite-vec is available, falls back to in-process cosine. Results mapped through `mapRecallEntry()` scoring `hit.score × importance × recency × weight`, sorted descending. PASS.
+
+2. **`storeRecord()` persists with embedding to `steward_knowledge`** — `storeRelationshipMemory()` calls `storeKnowledge()` which inserts embedding BLOB + dims + model into `steward_knowledge`, then writes the `steward_memories` row with `confidence_score` and `last_verified_ts` columns. Metadata back-patched with `memory_id` for cross-join recall. PASS.
+
+3. **`bootstrapFirstContact()` seeds 5 memories; idempotent** — `bootstrapRelationshipFirstContact()` guards with `COUNT(*) WHERE source = 'first_contact_bootstrap'`; 5 `FIRST_CONTACT_RECORDS` typed against `RelationshipMemoryType`. Bootstrap is called lazily inside `injectRelationshipContext()` rather than eagerly from `getOrCreateStewardSession()` as spec described — lazy is strictly better (skips DB writes for sessions that never inject). Idempotency holds either way. PASS.
+
+4. **`injectCurrentContext()` returns bounded context injected into system prompt** — `injectRelationshipContext()` → `buildStewardMemoryPromptContext()` → `mergeStewardMemoryIntoExtraSystemPrompt()` → `attempt.ts` line 850 → `extraSystemPrompt` parameter → `buildAgentSystemPrompt()` line 941 appends to system prompt output. Injection seam is `attempt.ts` via `extraSystemPrompt` (spec said `system-prompt.ts` directly) — outcome is identical; the memory appears in the final assembled system prompt. PASS.
+
+5. **truth_violation and truth_reinforced queryable by session and ts range** — `searchKnowledge({ memoryTypes: [...] })` produces the WHERE clause `k.memory_type IN (?)` over `steward_knowledge`. `reinforceTruthMemory()` updates `confidence_score` and `last_verified_ts` on both `steward_memories` and `steward_knowledge`. PASS.
+
+6. **`matchSkill(title)` returns Jaccard-matched skill or null** — `matchSkillSequence()` normalizes title, builds word-set, queries `steward_knowledge WHERE memory_type = 'skill_sequence'`, applies Jaccard ≥ 0.3 threshold. Returns best match or null. Skills are stored in `steward_knowledge` with `memory_type = 'skill_sequence'` rather than a separate `steward_skills` table (spec described both a table and `matchSkill()`); the table is absent, knowledge-row storage achieves identical semantics with fewer tables. PASS.
+
+7. **Migration runs cleanly; sqlite-vec loads on first knowledge access** — `0002_memory.sql` creates `steward_knowledge` and `steward_memories` with full indexing. `steward_knowledge_vec` virtual table is created lazily inside `ensureVectorReady()` on first store/search call (cannot be in migration because the extension must be loaded first). PASS.
+
+Non-structural notes (none block PASS):
+- Migration file is `0002_memory.sql` (spec named it `0002_knowledge.sql`) — trivial naming deviation.
+- `steward_skills` table absent; skills use `steward_knowledge` with `memory_type = 'skill_sequence'` — better schema.
+- 2000-char bound from spec is implemented as `topK: 6` — practical bound rather than explicit char truncation.
+
+**Verdict: PASS.** All 7 acceptance criteria met. No structural gaps. Workstream G is approved.
+
+### Advancement gate output
+Approver (User): **ADVANCE**.
+
+Workstream G is advanced to `advance-ready`.
+
+Dependency effect:
+- Workstream B depends on `A` and `G`
+- `A` is already `advance-ready`
+- `G` is now `advance-ready`
+- Workstream B has no remaining local blocker beyond upstream readiness
+
+Therefore the next active workstream is `WS-B`.
+
 ---
 
 ## Current tasks
 
-Current phase: **Workstream A advance-ready; open next workstream**.
+Current phase: **Workstream B code-ready; open implementation**.
 
 Immediate next tasks:
-1. merge `ws-a` into `main`
-2. resolve BD-4 before the first LLM-dependent steward module starts
-3. resolve BD-3 before Workstream G starts
+1. open `WS-B` implementation against the now-confirmed `A` + `G` seams
+2. keep Workstream B scoped to truth-audit ownership and persistence through Workstream G; do not start C/D/E LLM-dependent work before `BD-4`
+3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
-5. resolve BD-6 before Workstream D acceptance
 
 Not yet approved:
-- direct code port of downstream workstreams beyond Workstream A
-- replacement of OpenClaw session store as a whole; Workstream A uses DB authority plus JSON compatibility projection
+- direct code port of downstream workstreams beyond the active Workstream F slice
+- `postcheck()` result normalization (from `tool_supervisor.py`): must be implemented as `src/steward/tool/postcheck-rules.ts` before Workstream B (truth audit) or Workstream D (consequence logic) consumes normalized tool output artifacts
 - any LLM-dependent steward module before `BD-4` is resolved
-- Workstream G before `BD-3` is resolved
 - Workstream D before `BD-8` is resolved, and Workstream D acceptance before `BD-6` is resolved

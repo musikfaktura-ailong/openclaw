@@ -6,6 +6,7 @@ import { createRuntimeFlow, completeRuntimeFlow } from "./runtime-flow.js";
 import { appendStewardEvent } from "./runtime-events.js";
 import { getRuntimeState } from "./runtime-state.js";
 import { markRuntimeIdle, markRuntimeRunning } from "./runtime-state-repo.js";
+import { recordSessionContinuityMemory } from "../memory/relationship-memory.js";
 import { getOrCreateStewardSession } from "./session-authority.js";
 import { projectSessionToCompatibilityStore } from "./session-projection.js";
 
@@ -64,6 +65,10 @@ export async function recordTurnComplete(params: {
       sessionKey: params.sessionKey,
       aborted: params.result?.aborted ?? false,
     },
+  });
+  await recordSessionContinuityMemory({
+    sessionKey: params.sessionKey,
+    aborted: params.result?.aborted ?? false,
   });
   await projectSessionToCompatibilityStore({
     storePath: params.storePath,
