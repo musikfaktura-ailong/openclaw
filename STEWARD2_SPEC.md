@@ -1987,8 +1987,12 @@ Non-structural notes (none block PASS):
 Current phase: **Workstream G reviewed; ready for advancement gate**.
 
 Immediate next tasks:
-1. request advancement decision for `WS-G`; if advance-ready, merge `ws-g` to main
-2. open the next approved workstream
+1. **Codex: retest WS-G from scratch and push advancement commit**
+   ```
+   corepack pnpm exec vitest run src/steward/memory/knowledge-store.test.ts src/steward/memory/relationship-memory.test.ts src/steward/memory/prompt-context.test.ts src/steward/runtime/ws-a.integration.test.ts
+   ```
+   Branch: `ws-g`. Commit result + push. Then report: branch, new commit hash, pushed-to URL. Claude will write the advancement gate verdict.
+2. After advancement gate ADVANCE: Codex merges `ws-g` → `main` via PR.
 3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
