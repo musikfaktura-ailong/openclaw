@@ -77,7 +77,7 @@ export function buildClaimRecordFromResult(params: {
   const category =
     inferCategoryFromEvidence(title, content, params.allowedCategories) ||
     inferCategory(`${params.query}\n${title}\n${content}`, params.allowedCategories);
-  const selectedOpportunity = inferSelectedOpportunity(title, params.query, content);
+  const selectedOpportunity = inferSelectedOpportunity(title, params.query);
   const keyMetric = inferKeyMetric(content, String(params.item.snippet ?? ""));
   if (!selectedOpportunity || !keyMetric) {
     return null;
