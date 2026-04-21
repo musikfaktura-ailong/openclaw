@@ -30,7 +30,9 @@ export type StewardEventKind =
   | "runtime.idle"
   | "flow.created"
   | "flow.completed"
-  | "tool.precheck.blocked";
+  | "tool.precheck.blocked"
+  | "truth.claim_record"
+  | "truth.candidate_decision";
 
 export type StewardRuntimeStateRow = {
   sessionKey: string;

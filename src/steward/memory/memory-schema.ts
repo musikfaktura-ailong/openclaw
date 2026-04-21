@@ -1,3 +1,4 @@
+import type { TruthAuditMetadata } from "../truth/truth-types.js";
 import type { StewardKnowledgeMemoryType, RelationshipMemoryType } from "./memory-types.js";
 
 export type StewardKnowledgeRow = {
@@ -29,4 +30,6 @@ export type StewardMemoryRow = {
   updatedTs: number;
 };
 
-export type StewardKnowledgeMetadata = Record<string, unknown>;
+export type StewardKnowledgeMetadata = Record<string, unknown> & {
+  truth_audit?: TruthAuditMetadata;
+};

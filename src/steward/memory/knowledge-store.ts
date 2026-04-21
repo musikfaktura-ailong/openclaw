@@ -137,6 +137,10 @@ function mapKnowledgeRow(row: {
   };
 }
 
+function requiresTruthAudit(memoryType: StewardKnowledgeMemoryType): boolean {
+  return memoryType === "truth_violation" || memoryType === "truth_reinforced";
+}
+
 export async function storeKnowledge(params: {
   sessionKey?: string;
   text: string;
@@ -150,6 +154,9 @@ export async function storeKnowledge(params: {
   const now = params.now ?? Date.now();
   const memoryType = params.memoryType ?? "shared_thread";
   const text = params.text.trim().slice(0, 4_000);
+  if (requiresTruthAudit(memoryType) && !params.metadata?.truth_audit) {
+    throw new Error(`truth_audit_required_for_${memoryType}`);
+  }
   const embeddingResult = await embedWithStewardModel({
     text,
     embedder: params.embedder,
