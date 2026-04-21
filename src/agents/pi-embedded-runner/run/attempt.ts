@@ -24,6 +24,7 @@ import { getPluginToolMeta } from "../../../plugins/tools.js";
 import { isAcpSessionKey, isSubagentSessionKey } from "../../../routing/session-key.js";
 import { normalizeOptionalLowercaseString } from "../../../shared/string-coerce.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
+import { mergeStewardMemoryIntoExtraSystemPrompt } from "../../../steward/memory/prompt-context.js";
 import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
 import { resolveUserPath } from "../../../utils.js";
 import { normalizeMessageChannel } from "../../../utils/message-channel.js";
@@ -846,6 +847,11 @@ export async function runEmbeddedAttempt(
       },
     });
 
+    const stewardExtraSystemPrompt = await mergeStewardMemoryIntoExtraSystemPrompt({
+      sessionKey: params.sessionKey,
+      extraSystemPrompt: params.extraSystemPrompt,
+    });
+
     const builtAppendPrompt =
       resolveSystemPromptOverride({
         config: params.config,
@@ -855,7 +861,7 @@ export async function runEmbeddedAttempt(
         workspaceDir: effectiveWorkspace,
         defaultThinkLevel: params.thinkLevel,
         reasoningLevel: params.reasoningLevel ?? "off",
-        extraSystemPrompt: params.extraSystemPrompt,
+        extraSystemPrompt: stewardExtraSystemPrompt,
         ownerNumbers: params.ownerNumbers,
         ownerDisplay: ownerDisplay.ownerDisplay,
         ownerDisplaySecret: ownerDisplay.ownerDisplaySecret,

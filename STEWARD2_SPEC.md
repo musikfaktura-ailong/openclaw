@@ -570,12 +570,12 @@ This board is the single glanceable source of implementation readiness.
 | Workstream | Name | Current state | Code-ready | Blocking decisions that must be closed first |
 | --- | --- | --- | --- | --- |
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
-| B | Truth audit | `analyze` | `no` | depends on `A`, `G`; no local blocker beyond upstream readiness |
+| B | Truth audit | `implement` | `yes` | depends on `A`, `G`; no local blocker beyond upstream readiness |
 | C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
 | D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
-| G | Relationship memory / knowledge store | `confirm` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate pending |
+| G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
 
 Interpretation:
@@ -1980,19 +1980,28 @@ Non-structural notes (none block PASS):
 
 **Verdict: PASS.** All 7 acceptance criteria met. No structural gaps. Workstream G is approved.
 
+### Advancement gate output
+Approver (User): **ADVANCE**.
+
+Workstream G is advanced to `advance-ready`.
+
+Dependency effect:
+- Workstream B depends on `A` and `G`
+- `A` is already `advance-ready`
+- `G` is now `advance-ready`
+- Workstream B has no remaining local blocker beyond upstream readiness
+
+Therefore the next active workstream is `WS-B`.
+
 ---
 
 ## Current tasks
 
-Current phase: **Workstream G reviewed; ready for advancement gate**.
+Current phase: **Workstream B code-ready; open implementation**.
 
 Immediate next tasks:
-1. **Codex: retest WS-G from scratch and push advancement commit**
-   ```
-   corepack pnpm exec vitest run src/steward/memory/knowledge-store.test.ts src/steward/memory/relationship-memory.test.ts src/steward/memory/prompt-context.test.ts src/steward/runtime/ws-a.integration.test.ts
-   ```
-   Branch: `ws-g`. Commit result + push. Then report: branch, new commit hash, pushed-to URL. Claude will write the advancement gate verdict.
-2. After advancement gate ADVANCE: Codex merges `ws-g` → `main` via PR.
+1. open `WS-B` implementation against the now-confirmed `A` + `G` seams
+2. keep Workstream B scoped to truth-audit ownership and persistence through Workstream G; do not start C/D/E LLM-dependent work before `BD-4`
 3. resolve BD-4 before the first LLM-dependent steward module starts
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
