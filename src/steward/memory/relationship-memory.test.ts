@@ -6,6 +6,7 @@ import {
   reinforceTruthMemory,
   storeRelationshipMemory,
 } from "./relationship-memory.js";
+import type { TruthAuditMetadata } from "../truth/truth-types.js";
 
 afterEach(() => {
   closeStewardDb();
@@ -21,6 +22,58 @@ describe("WS-G relationship memory", () => {
         text.includes("truth") ? [1, 0, 0, 0] : text.includes("coffee") ? [0, 1, 0, 0] : [0, 0, 1, 0],
       );
 
+    const truthAudit: TruthAuditMetadata = {
+      auditedAt: Date.now(),
+      summary: { critical: 1, warn: 0, info: 0 },
+      claimRecord: {
+        selectedOpportunity: "Acme Pricing API",
+        category: "api_service",
+        sourceUrl: "https://acme.dev/pricing",
+        sourceDomain: "acme.dev",
+        sourceTitle: "Acme Pricing API",
+        sourceExcerpt: "Acme Pricing API charges $299 per month.",
+        sourceExcerptHash: "hash",
+        keyMetric: "$299 per month",
+        metricNumbers: ["299"],
+        initialHypothesis: "pricing unsupported",
+        claimType: "observed",
+        uncertaintyBefore: "",
+        uncertaintyAfter: "",
+        nextTestBefore: "",
+        nextTestAfter: "",
+      },
+      candidateRecord: {
+        opportunityKind: "automation_service",
+        sourceKind: "product_page",
+        metricKind: "price",
+        metricValue: "$299 per month",
+        commercialRelevance: "direct",
+        implementationRelevance: "indirect",
+        decisionRelevance: "high",
+        extractReadiness: "ready",
+        supportsHypothesis: "partial",
+        supportsNextTest: "partial",
+      },
+      epistemicDelta: {
+        newSource: true,
+        newMetric: true,
+        newClaim: true,
+        uncertaintyChanged: true,
+        nextTestChanged: true,
+        deltaScore: 5,
+        mostSimilarSource: "",
+        mostSimilarTopic: "",
+      },
+      familyOverlap: {
+        familyOverlap: 0,
+        sameCategory: false,
+        sameDomainFamily: false,
+        mostSimilarSource: "",
+        mostSimilarTopic: "",
+        matchedTokens: [],
+      },
+    };
+
     const truthMemoryId = await storeRelationshipMemory({
       sessionKey,
       memoryType: "truth_violation",
@@ -29,6 +82,7 @@ describe("WS-G relationship memory", () => {
       importance: 0.9,
       confidenceScore: 0.7,
       lastVerifiedTs: Date.now(),
+      truthAudit,
       embedder,
     });
     await storeRelationshipMemory({
@@ -77,6 +131,57 @@ describe("WS-G relationship memory", () => {
 
   it("reinforces truth memories in both memory and knowledge rows", async () => {
     initStewardDb(":memory:");
+    const truthAudit: TruthAuditMetadata = {
+      auditedAt: Date.now(),
+      summary: { critical: 0, warn: 0, info: 1 },
+      claimRecord: {
+        selectedOpportunity: "Policy verification",
+        category: "shared_thread",
+        sourceUrl: "https://example.com/policy",
+        sourceDomain: "example.com",
+        sourceTitle: "Policy",
+        sourceExcerpt: "Policy verified.",
+        sourceExcerptHash: "hash",
+        keyMetric: "100%",
+        metricNumbers: ["100"],
+        initialHypothesis: "policy verified",
+        claimType: "observed",
+        uncertaintyBefore: "",
+        uncertaintyAfter: "",
+        nextTestBefore: "",
+        nextTestAfter: "",
+      },
+      candidateRecord: {
+        opportunityKind: "sell_software_tool",
+        sourceKind: "product_page",
+        metricKind: "conversion_rate",
+        metricValue: "100%",
+        commercialRelevance: "direct",
+        implementationRelevance: "indirect",
+        decisionRelevance: "high",
+        extractReadiness: "ready",
+        supportsHypothesis: "partial",
+        supportsNextTest: "partial",
+      },
+      epistemicDelta: {
+        newSource: true,
+        newMetric: true,
+        newClaim: true,
+        uncertaintyChanged: true,
+        nextTestChanged: true,
+        deltaScore: 5,
+        mostSimilarSource: "",
+        mostSimilarTopic: "",
+      },
+      familyOverlap: {
+        familyOverlap: 0,
+        sameCategory: false,
+        sameDomainFamily: false,
+        mostSimilarSource: "",
+        mostSimilarTopic: "",
+        matchedTokens: [],
+      },
+    };
     const memoryId = await storeRelationshipMemory({
       sessionKey: "agent:main:webchat:direct:user-2",
       memoryType: "truth_reinforced",
@@ -85,6 +190,7 @@ describe("WS-G relationship memory", () => {
       importance: 0.8,
       confidenceScore: 0.5,
       lastVerifiedTs: Date.now(),
+      truthAudit,
     });
 
     expect(reinforceTruthMemory({ memoryId, delta: 0.2, source: "test" })).toBe(true);

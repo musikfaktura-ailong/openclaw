@@ -1,4 +1,5 @@
 import { getDb } from "../db/db-bootstrap.js";
+import type { TruthAuditMetadata } from "../truth/truth-types.js";
 import { searchKnowledge, storeKnowledge, type StewardKnowledgeEntry } from "./knowledge-store.js";
 import { resolveMemoryWeight, type RelationshipMemoryType } from "./memory-types.js";
 import type { StewardEmbedder } from "./embedder.js";
@@ -105,6 +106,7 @@ export async function storeRelationshipMemory(params: {
   taskId?: number;
   confidenceScore?: number;
   lastVerifiedTs?: number;
+  truthAudit?: TruthAuditMetadata;
   embedder?: StewardEmbedder;
   now?: number;
 }): Promise<number> {
@@ -132,6 +134,7 @@ export async function storeRelationshipMemory(params: {
       task_id: params.taskId ?? null,
       confidence_score: params.confidenceScore ?? null,
       last_verified_ts: params.lastVerifiedTs ?? null,
+      truth_audit: params.truthAudit,
     },
   });
   const inserted = db
@@ -177,6 +180,7 @@ export async function storeRelationshipMemory(params: {
       task_id: params.taskId ?? null,
       confidence_score: params.confidenceScore ?? null,
       last_verified_ts: params.lastVerifiedTs ?? null,
+      truth_audit: params.truthAudit,
     }),
     knowledgeId,
   );
