@@ -9,6 +9,10 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "../shared/string-coerce.js";
+import {
+  promptPreamble as buildStewardPromptPreamble,
+  STEWARDSHIP_CORE_POLICY_VERSION,
+} from "../steward/mission/stewardship-core.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import type { BootstrapMode } from "./bootstrap-mode.js";
 import {
@@ -658,11 +662,19 @@ export function buildAgentSystemPrompt(params: {
 
   // For "none" mode, return just the basic identity line
   if (promptMode === "none") {
-    return "You are a personal assistant running inside OpenClaw.";
+    return ["You are a personal assistant running inside OpenClaw.", "", buildStewardPromptPreamble()]
+      .filter(Boolean)
+      .join("\n");
   }
 
   const lines = [
     "You are a personal assistant running inside OpenClaw.",
+    "",
+    // Workstream E phase 1 seam: the steward mission core is injected here once so
+    // every CLI and embedded system prompt consumes the same host-owned policy text.
+    "## Stewardship Core",
+    `Policy version: ${STEWARDSHIP_CORE_POLICY_VERSION}`,
+    buildStewardPromptPreamble(),
     "",
     "## Tooling",
     "Tool availability (filtered by policy):",

@@ -2124,13 +2124,35 @@ Claude: ran `vitest run src/steward/proof/proof-judge.test.ts` — 1 file, 3 tes
 
 ---
 
+## Workstream E handoff record
+
+### Implementation gate output
+Implementer (Codex): phase-1 WS-E scope only, per spec. Created `src/steward/mission/stewardship-core.ts`. Modified `src/agents/system-prompt.ts`, `src/agents/system-prompt-report.ts`, `src/config/sessions/types.ts`, and `src/agents/system-prompt-report.test.ts`.
+
+Implemented invariant:
+- the canonical steward mission core now comes from `src/steward/mission/stewardship-core.ts`
+- runtime prompt assembly injects that core through one explicit OpenClaw seam in `system-prompt.ts`
+- prompt/report metadata now exposes steward policy version, core hash, source hash, and whether the stewardship core was injected
+- this is phase-1 only; time-budget, task-value, stewardship-reflection, stewardship-audit, goals-registry, and heuristics remain for later WS-E completion
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec tsc --noEmit` — pass
+- `corepack pnpm exec vitest run src/agents/system-prompt.test.ts src/agents/system-prompt-report.test.ts` — pass (`2` files, `66` tests)
+
+Not claimed yet:
+- no Review gate output yet
+- no formal Verification gate output yet
+- no Advancement gate decision yet
+
+---
+
 ## Current tasks
 
-Current phase: **WS-C advance-ready; merging ws-c → main. WS-E is next code-ready workstream. WS-D still blocked on BD-6 and BD-8.**
+Current phase: **WS-E phase 1 implemented on `ws-e` and ready for Verification gate. WS-D still blocked on BD-6 and BD-8.**
 
 Immediate next tasks:
-1. **Codex: merge `ws-c` → `main` via PR #4** ← in progress
-2. **Codex: implement WS-E** (stewardship mission / operator hierarchy; code-ready after BD-4 resolved)
+1. **Codex: `STEWARD2 VERIFY WS-E`**
+2. if verification confirms: **Claude: `STEWARD2 APPROVE WS-E → [next]`**
 3. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
