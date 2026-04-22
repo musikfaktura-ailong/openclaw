@@ -573,7 +573,7 @@ This board is the single glanceable source of implementation readiness.
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
 | D | Consequence logic | `analyze` | `no` | `BD-6`, `BD-8` still open; `BD-4` resolved; depends on `A`, `F`, `G` |
-| E | Stewardship mission / operator hierarchy | `confirm` | `yes` | phase 1 verified: PASS; advancement gate pending |
+| E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | phase 1 verified: PASS; advancement gate: ADVANCE |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
@@ -2153,17 +2153,20 @@ Verification evidence:
 
 Verdict: **PASS.** Phase 1 acceptance criteria met. Seam is active (not just imported). All 66 tests pass. WS-E phase 1 is ready for Advancement gate.
 
-Not claimed yet:
-- no Advancement gate decision yet
+### Advancement gate output
+Claude: ran `vitest run src/agents/system-prompt.test.ts src/agents/system-prompt-report.test.ts` — 2 files, 66 tests, 66 passed. Confirmed seam active at `system-prompt.ts:665,675,677`. Phase 1 scope correctly bounded.
+
+**ADVANCE.** WS-E phase 1 merges to main.
 
 ---
 
 ## Current tasks
 
-Current phase: **WS-E phase 1 verified on `ws-e`; ready for Claude Advancement gate. WS-D still blocked on BD-6 and BD-8.**
+Current phase: **WS-E advance-ready; merge ws-e → main. WS-D still blocked on BD-6 and BD-8.**
 
 Immediate next tasks:
-1. **Claude: Advancement gate decision for WS-E**
+1. **Codex: merge `ws-e` → `main` via PR**
+2. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
 3. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
