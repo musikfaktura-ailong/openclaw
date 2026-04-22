@@ -571,7 +571,7 @@ This board is the single glanceable source of implementation readiness.
 | --- | --- | --- | --- | --- |
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
-| C | Proof judge | `implement` | `yes` | resolved: `BD-4`; depends on `A`, `B`, `G` (all confirmed) |
+| C | Proof judge | `confirm` | `yes` | reviewed: PASS; advancement gate pending |
 | D | Consequence logic | `analyze` | `no` | `BD-6`, `BD-8` still open; `BD-4` resolved; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `implement` | `yes` | resolved: `BD-4`; depends on `A` (confirmed); LLM-scored parts now unblocked |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
@@ -1450,6 +1450,34 @@ We must see:
   - tests proving stale/generic/unsupported candidates are rejected deterministically
 - `runtime evidence`
   - one live candidate path shows a truth-audited decision and stored findings
+
+## Workstream C review gate
+
+Reviewer: Claude. Files read: `proof-types.ts`, `proof-schema.ts`, `proof-history.ts`, `proof-examples.ts`, `proof-judge.ts`, `novel-flag.ts`, `0003_proof.sql`, `proof-judge.test.ts`. Seam confirmed in `session-store.ts` → `session-bridge.ts`.
+
+Acceptance criterion assessment:
+
+1. **A turn cannot be marked steward-successful without passing proof criteria** — `judgeAndPersistProof()` called from `session-bridge.ts:recordTurnComplete()` which is called in `session-store.ts` after every agent turn. Verdict gates on `grounded && score >= 0.65`. PASS.
+
+2. **Proof verdicts persisted with acceptance_status, score, failure_class** — `steward_proofs` table in `0003_proof.sql`: all required fields present (`verdict`, `score`, `failure_class`, `grounded`, `accepted_at`, `rejected_at`, `rejection_reason`). `judgeAndPersistProof()` inserts and emits `proof.accepted` / `proof.rejected` events. PASS.
+
+3. **Proof examples (good/bad) retrievable by task_type from knowledge store** — `storeProofExample()` writes to `steward_proof_examples` + `steward_knowledge` (via `skill_context` memory type); `retrieveSimilarProofExamples()` filters by `task_type` and `label` from vector search results. Dedup via SHA-1 `content_hash`. PASS.
+
+4. **Heuristic fallback produces deterministic verdict when judge model unavailable** — `heuristicFallback()` covers all 6 task types with specific checks (URL required for learning, metric required for steward_health, lexical overlap for general); `contributionHeuristicFallback()` enforces key-value proof format with metric presence; used when no classifier injected or on classifier error. PASS.
+
+5. **Module evidence** — all 6 spec-listed modules present: `proof-judge.ts`, `proof-types.ts`, `proof-history.ts`, `proof-examples.ts`, `proof-schema.ts`, `novel-flag.ts`. PASS.
+
+6. **Boundary evidence** — seam: `session-store.ts:updateSessionStoreAfterAgentRun()` → `session-bridge.ts:recordTurnComplete()` → `judgeAndPersistProof()`. Classifier injected via `createSimpleCompletionStewardClassifier()` using haiku-4-5. PASS.
+
+7. **Novel flag** — `handleNovelProofFlag()` emits `novel_claim.flagged` event and stores novel proof as `good` / `novel_flag` labeled example when `novelFlag=true && novelConfidence > 0.85`. Test proves this path via stub classifier. PASS.
+
+Non-structural notes:
+- `StewardClassifier` is defined as an interface with `classifyJson<T>()` rather than the simple function type from BD-4 spec — stricter typing, no behavioral difference.
+- Seam is `session-bridge.ts` (not `attempt-execution.runtime.ts` as spec named) — same functional boundary, correct decomposition.
+
+**Verdict: PASS.** All 4 acceptance criteria and advancement gate requirements met. 1 file, 3 tests passing.
+
+---
 
 ### Before advancing past Workstream C. Proof judge
 
