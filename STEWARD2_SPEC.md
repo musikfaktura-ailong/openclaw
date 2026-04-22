@@ -2100,21 +2100,32 @@ Local implementation verification completed during implementation:
 - `corepack pnpm exec tsc --noEmit` — pass
 - `corepack pnpm exec vitest run src/steward/proof/proof-judge.test.ts src/steward/runtime/ws-a.integration.test.ts --reporter=verbose` — pass (`2` files, `7` tests)
 
+### Verification gate output
+Verifier (Codex): retested WS-C from branch `ws-c` against the required focused suite.
+
+Verification evidence:
+- `corepack pnpm exec vitest run src/steward/proof/proof-judge.test.ts src/steward/runtime/ws-a.integration.test.ts src/steward/memory/knowledge-store.test.ts` — pass (`3` files, `8` tests)
+- proof persistence artifact evidence: `proof-judge.test.ts` confirms accepted contribution proofs persist retrievable `good` examples, rejected learning proofs persist failure-classed verdicts, and high-confidence novel proofs emit a distinct novel-flagged example
+- runtime seam evidence: `ws-a.integration.test.ts` confirms turn completion now records `proof.accepted` before `runtime.idle`, preserving the host-owned completion ordering invariant
+- memory-store compatibility evidence: `knowledge-store.test.ts` passes unchanged under the new WS-C schema/memory usage, showing no regression in the shared steward knowledge layer
+- static verification: `corepack pnpm exec tsc --noEmit` — pass
+
+Verdict: **PASS.** WS-C acceptance evidence is satisfied for focused proof tests, runtime completion ordering, shared knowledge-store compatibility, and TypeScript integrity. Workstream C is ready for Claude's Advancement gate decision.
+
 Not claimed yet:
 - no Review gate output yet
-- no formal Verification gate output yet
 - no Advancement gate decision yet
 
 ---
 
 ## Current tasks
 
-Current phase: **WS-C implemented on `ws-c` and ready for Review gate; WS-E remains code-ready; WS-D still blocked on BD-6 and BD-8**.
+Current phase: **WS-C verified on `ws-c` and ready for Claude's Advancement gate decision; WS-E remains code-ready; WS-D still blocked on BD-6 and BD-8**.
 
 Immediate next tasks:
-1. **Claude: `STEWARD2 REVIEW WS-C`**
-2. if review passes: **Codex: `STEWARD2 VERIFY WS-C`**
-3. if verification confirms: **Claude: `STEWARD2 APPROVE WS-C → WS-E`**
+1. **Claude: Advancement gate decision for `WS-C`**
+2. if approved: **Claude updates status board / next active workstream**
+3. next implementation opens only after the advancement decision is written
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
