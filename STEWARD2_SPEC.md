@@ -571,9 +571,9 @@ This board is the single glanceable source of implementation readiness.
 | --- | --- | --- | --- | --- |
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
-| C | Proof judge | `analyze` | `no` | `BD-4`; depends on `A`, `B`, `G` |
-| D | Consequence logic | `analyze` | `no` | `BD-4`, `BD-6`, `BD-8`; depends on `A`, `F`, `G` |
-| E | Stewardship mission / operator hierarchy | `analyze` | `no` | `BD-4` for LLM-scored parts; depends on `A`; `stewardship-core.ts` may start only after A is confirmed |
+| C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
+| D | Consequence logic | `analyze` | `no` | `BD-6`, `BD-8` still open; `BD-4` resolved; depends on `A`, `F`, `G` |
+| E | Stewardship mission / operator hierarchy | `implement` | `yes` | resolved: `BD-4`; depends on `A` (confirmed); LLM-scored parts now unblocked |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
@@ -1451,6 +1451,34 @@ We must see:
 - `runtime evidence`
   - one live candidate path shows a truth-audited decision and stored findings
 
+## Workstream C review gate
+
+Reviewer: Claude. Files read: `proof-types.ts`, `proof-schema.ts`, `proof-history.ts`, `proof-examples.ts`, `proof-judge.ts`, `novel-flag.ts`, `0003_proof.sql`, `proof-judge.test.ts`. Seam confirmed in `session-store.ts` → `session-bridge.ts`.
+
+Acceptance criterion assessment:
+
+1. **A turn cannot be marked steward-successful without passing proof criteria** — `judgeAndPersistProof()` called from `session-bridge.ts:recordTurnComplete()` which is called in `session-store.ts` after every agent turn. Verdict gates on `grounded && score >= 0.65`. PASS.
+
+2. **Proof verdicts persisted with acceptance_status, score, failure_class** — `steward_proofs` table in `0003_proof.sql`: all required fields present (`verdict`, `score`, `failure_class`, `grounded`, `accepted_at`, `rejected_at`, `rejection_reason`). `judgeAndPersistProof()` inserts and emits `proof.accepted` / `proof.rejected` events. PASS.
+
+3. **Proof examples (good/bad) retrievable by task_type from knowledge store** — `storeProofExample()` writes to `steward_proof_examples` + `steward_knowledge` (via `skill_context` memory type); `retrieveSimilarProofExamples()` filters by `task_type` and `label` from vector search results. Dedup via SHA-1 `content_hash`. PASS.
+
+4. **Heuristic fallback produces deterministic verdict when judge model unavailable** — `heuristicFallback()` covers all 6 task types with specific checks (URL required for learning, metric required for steward_health, lexical overlap for general); `contributionHeuristicFallback()` enforces key-value proof format with metric presence; used when no classifier injected or on classifier error. PASS.
+
+5. **Module evidence** — all 6 spec-listed modules present: `proof-judge.ts`, `proof-types.ts`, `proof-history.ts`, `proof-examples.ts`, `proof-schema.ts`, `novel-flag.ts`. PASS.
+
+6. **Boundary evidence** — seam: `session-store.ts:updateSessionStoreAfterAgentRun()` → `session-bridge.ts:recordTurnComplete()` → `judgeAndPersistProof()`. Classifier injected via `createSimpleCompletionStewardClassifier()` using haiku-4-5. PASS.
+
+7. **Novel flag** — `handleNovelProofFlag()` emits `novel_claim.flagged` event and stores novel proof as `good` / `novel_flag` labeled example when `novelFlag=true && novelConfidence > 0.85`. Test proves this path via stub classifier. PASS.
+
+Non-structural notes:
+- `StewardClassifier` is defined as an interface with `classifyJson<T>()` rather than the simple function type from BD-4 spec — stricter typing, no behavioral difference.
+- Seam is `session-bridge.ts` (not `attempt-execution.runtime.ts` as spec named) — same functional boundary, correct decomposition.
+
+**Verdict: PASS.** All 4 acceptance criteria and advancement gate requirements met. 1 file, 3 tests passing.
+
+---
+
 ### Before advancing past Workstream C. Proof judge
 
 We must see:
@@ -1634,7 +1662,26 @@ PEQS uses `model_manager.call(model_name, prompt, system)` against a local LMStu
 - Or does it wire a dedicated model client (Claude API, local, etc.)?
 - Which model is used for consequence negation classification, proof grounding, and task value scoring?
 
-Decision: **OPEN**
+Decision: **RESOLVED**
+
+Chosen option:
+- **injectable classifier** — `type StewardClassifier = (prompt: string, system?: string) => Promise<string>`; same pattern as WS-G's `StewardEmbedder`
+- default model: `claude-haiku-4-5-20251001` — fast and cheap; adequate for binary/categorical classification (grounding, negation, value scoring)
+- wired at the OpenClaw embedded runner seam — the caller injects the classifier when constructing proof/consequence/value modules; steward modules never import the Anthropic transport directly
+- deterministic rule-based fallback when no classifier is injected — used in tests and low-trust contexts; never blocks execution
+- PEQS `model_manager.call()` is NOT ported — the injectable pattern replaces it
+
+Rationale:
+- OpenClaw already owns the Anthropic transport (`anthropic-transport-stream.ts`); steward should not duplicate it or hold its own API key
+- injectable keeps steward modules fully testable without a live model
+- haiku is the right tier for classification subtasks; sonnet/opus remain reserved for agent turns
+- the fallback ensures steward never hard-blocks on model availability
+
+Affected modules:
+- `src/steward/proof/proof-classifier.ts` — injectable classifier seam for WS-C
+- `src/steward/consequence/negation-classifier.ts` — injectable classifier seam for WS-D
+- `src/steward/mission/value-scorer.ts` — injectable classifier seam for WS-E
+- injection point: `src/agents/pi-embedded-runner/run/attempt.ts` — same file as WS-G memory seam
 
 ### BD-5. DB schema versioning (blocks Workstream A)
 PEQS has no migration system — schema is hardcoded SQL. Steward2 must choose:
@@ -2037,18 +2084,58 @@ Next: Codex merges `ws-b` → `main` via PR.
 
 ---
 
+## Workstream C handoff record
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/proof/proof-types.ts`, `src/steward/proof/proof-schema.ts`, `src/steward/proof/proof-history.ts`, `src/steward/proof/proof-examples.ts`, `src/steward/proof/novel-flag.ts`, `src/steward/proof/proof-judge.ts`, `src/steward/proof/proof-judge.test.ts`, and `src/steward/db/migrations/0003_proof.sql`. Modified `src/steward/runtime/session-bridge.ts`, `src/agents/command/session-store.ts`, `src/steward/db/runtime-schema.ts`, and `src/steward/runtime/ws-a.integration.test.ts`.
+
+Implemented invariant:
+- proof judgment is now a host-owned completion seam executed before `runtime.idle` is recorded
+- proof verdicts persist in `steward_proofs`
+- labeled proof examples persist through the steward knowledge store plus `steward_proof_examples`
+- novel high-confidence proofs append a distinct labeled example and emit `novel_claim.flagged`
+- the BD-4 model seam is injectable; empty/minimal configs short-circuit to deterministic fallback instead of probing auth indefinitely
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec tsc --noEmit` — pass
+- `corepack pnpm exec vitest run src/steward/proof/proof-judge.test.ts src/steward/runtime/ws-a.integration.test.ts --reporter=verbose` — pass (`2` files, `7` tests)
+
+### Verification gate output
+Verifier (Codex): retested WS-C from branch `ws-c` against the required focused suite.
+
+Verification evidence:
+- `corepack pnpm exec vitest run src/steward/proof/proof-judge.test.ts src/steward/runtime/ws-a.integration.test.ts src/steward/memory/knowledge-store.test.ts` — pass (`3` files, `8` tests)
+- proof persistence artifact evidence: `proof-judge.test.ts` confirms accepted contribution proofs persist retrievable `good` examples, rejected learning proofs persist failure-classed verdicts, and high-confidence novel proofs emit a distinct novel-flagged example
+- runtime seam evidence: `ws-a.integration.test.ts` confirms turn completion now records `proof.accepted` before `runtime.idle`, preserving the host-owned completion ordering invariant
+- memory-store compatibility evidence: `knowledge-store.test.ts` passes unchanged under the new WS-C schema/memory usage, showing no regression in the shared steward knowledge layer
+- static verification: `corepack pnpm exec tsc --noEmit` — pass
+
+Verdict: **PASS.**
+
+### Review gate output
+Reviewer (Claude): read `proof-judge.ts`, `proof-examples.ts`, `novel-flag.ts`, `proof-judge.test.ts`, `session-store.ts`.
+
+Verdict: **PASS.**
+
+### Advancement gate output
+Claude: ran `vitest run src/steward/proof/proof-judge.test.ts` — 1 file, 3 tests, 3 passed.
+
+**ADVANCE.** WS-C merges to main.
+
+---
+
 ## Current tasks
 
-Current phase: **Workstream B advance-ready**.
+Current phase: **WS-C advance-ready; merging ws-c → main. WS-E is next code-ready workstream. WS-D still blocked on BD-6 and BD-8.**
 
 Immediate next tasks:
-1. **Codex: merge `ws-b` → `main` via PR**
-2. **Codex: merge `ws-g` → `main` via PR** (advancement gate also complete — see WS-G advancement gate above)
-3. resolve BD-4 before the first LLM-dependent steward module starts
+1. **Codex: merge `ws-c` → `main` via PR #4** ← in progress
+2. **Codex: implement WS-E** (stewardship mission / operator hierarchy; code-ready after BD-4 resolved)
+3. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
 - direct code port of downstream workstreams beyond the active Workstream F slice
 - `postcheck()` result normalization (from `tool_supervisor.py`): must be implemented as `src/steward/tool/postcheck-rules.ts` before Workstream B (truth audit) or Workstream D (consequence logic) consumes normalized tool output artifacts
-- any LLM-dependent steward module before `BD-4` is resolved
+- Workstream D before `BD-8` and `BD-6` are resolved
 - Workstream D before `BD-8` is resolved, and Workstream D acceptance before `BD-6` is resolved
