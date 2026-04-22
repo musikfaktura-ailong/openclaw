@@ -572,7 +572,7 @@ This board is the single glanceable source of implementation readiness.
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
-| D | Consequence logic | `analyze` | `no` | all blockers resolved (`BD-4`, `BD-6`, `BD-8`); depends on `A`, `F`, `G` |
+| D | Consequence logic | `confirm` | `yes` | implementation + Codex verification complete on `ws-d`; next gate is reviewer confirmation |
 | E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | phase 1 verified: PASS; advancement gate: ADVANCE |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
@@ -2164,13 +2164,43 @@ Claude: ran `vitest run src/agents/system-prompt.test.ts src/agents/system-promp
 
 ---
 
+## Workstream D handoff record
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/consequence/causal-model.ts`, `src/steward/consequence/truth-gate.ts`, `src/steward/consequence/consequence-simulator.ts`, `src/steward/consequence/operator-override.ts`, and `src/steward/consequence/action-policy-bridge.ts`. Added targeted tests in `src/steward/consequence/causal-model.test.ts`, `src/steward/consequence/truth-gate.test.ts`, `src/steward/consequence/consequence-bridge.test.ts`, `src/steward/consequence/operator-override.test.ts`, `src/steward/consequence/consequence-simulator.test.ts`, and `src/agents/pi-tools.before-tool-call.consequence.test.ts`. Modified `src/agents/pi-tools.before-tool-call.ts` to run steward consequence policy after the host-owned precheck seam and before tool execution. Modified `src/steward/db/runtime-schema.ts` to register typed consequence event kinds.
+
+Implemented invariant:
+- steward consequence policy is now owned by `src/steward/consequence/*`, not dispersed through ad hoc execution branches
+- the host seam is explicit: `precheckToolCall()` runs first, then `evaluateConsequencePolicy()`, then OpenClaw execution continues only if the steward consequence result is not `REROUTE` or `REFUSE`
+- deterministic truth-gated cases (`write`, `edit`, `apply_patch`, `knowledge_store`) are evaluated without LLM discretion
+- consequence recommendations are bridged through the OpenClaw approval class model via the BD-6 mapping artifact and persisted as steward events
+- operator overrides are persisted into relationship memory with 7-day fatigue tracking
+
+Local implementation verification completed during implementation:
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit` — pass
+- `corepack pnpm exec vitest run src/steward/consequence/causal-model.test.ts src/steward/consequence/truth-gate.test.ts src/steward/consequence/consequence-bridge.test.ts src/steward/consequence/operator-override.test.ts src/steward/consequence/consequence-simulator.test.ts src/agents/pi-tools.before-tool-call.consequence.test.ts` — pass (`6` files, `12` tests)
+
+### Verification gate output
+Verifier (Codex): targeted Workstream D verification passed on branch `ws-d`.
+
+Verification evidence:
+- focused WS-D suite passed: `corepack pnpm exec vitest run src/steward/consequence/causal-model.test.ts src/steward/consequence/truth-gate.test.ts src/steward/consequence/consequence-bridge.test.ts src/steward/consequence/operator-override.test.ts src/steward/consequence/consequence-simulator.test.ts src/agents/pi-tools.before-tool-call.consequence.test.ts` — pass (`6` files, `12` tests)
+- static verification passed after increasing Node heap for the full repo compiler process: `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+- module evidence: `src/steward/consequence/*` now owns the causal model, deterministic truth gate, simulator, override persistence, and the spec-named approval bridge shim
+- boundary evidence: `src/agents/pi-tools.before-tool-call.ts` now runs steward consequence evaluation after WS-F precheck and before wrapped tool execution, preserving the host-owned transition order
+- persistence evidence: `consequence-simulator.test.ts` directly inspects `steward_events` for `consequence.warning` and `consequence.refused`; `operator-override.test.ts` directly inspects `steward_memories` for persisted override rows and fatigue threshold behavior
+- runtime seam evidence: `pi-tools.before-tool-call.consequence.test.ts` proves a protected `write` action is blocked before tool execution and the underlying tool implementation is never called
+
+Verdict: **PASS.** Workstream D implementation and Codex verification are complete. Next process step is the reviewer gate.
+
+---
+
 ## Current tasks
 
-Current phase: **WS-E merged to main (PR #5); BD-6, BD-8 resolved; WS-D fully unblocked.**
+Current phase: **WS-D implemented on `ws-d`; Codex verification passed; waiting for reviewer gate.**
 
 Immediate next tasks:
-1. **Codex: STEWARD2 IMPLEMENT WS-D** — all blockers resolved (BD-4, BD-6, BD-8)
+1. **Claude: review WS-D** — consequence host seam, truth gate, override persistence, and event evidence are ready for reviewer confirmation
 
 Not yet approved:
-- WS-D acceptance before full consequence gate implementation is verified
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
