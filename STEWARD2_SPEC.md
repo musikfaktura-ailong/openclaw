@@ -572,7 +572,7 @@ This board is the single glanceable source of implementation readiness.
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
-| D | Consequence logic | `analyze` | `no` | `BD-6` still open; `BD-4`, `BD-8` resolved; depends on `A`, `F`, `G` |
+| D | Consequence logic | `analyze` | `no` | all blockers resolved (`BD-4`, `BD-6`, `BD-8`); depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | phase 1 verified: PASS; advancement gate: ADVANCE |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
@@ -1718,7 +1718,11 @@ Rejected alternatives:
 PEQS recommendations (ALLOW / WARN / REROUTE / REFUSE / ALLOW_BY_OPERATOR_OVERRIDE) must map to OpenClaw AcpApprovalClass (readonly_scoped / readonly_search / mutating / exec_capable / control_plane / interactive / other / unknown).
 Explicit mapping must be written before Workstream D is considered complete.
 
-Decision: **OPEN**
+Decision: **RESOLVED** — `src/steward/consequence/consequence-bridge.ts` (BD-6 artifact).
+- `ConsequenceRecommendation` type: 5 PEQS recommendation values.
+- `ConsequenceBridgeDecision` type: `approve`, `requireOperatorEscalation`, `persistConsequenceEvent`, `annotation`, `operatorOverride`.
+- `resolveBridgeDecision(recommendation, approvalClass, annotationText?)`: primary action from recommendation (ALLOW/WARN/ALLOW_BY_OPERATOR_OVERRIDE → approve; REROUTE/REFUSE → block) + class modifier (exec_capable always persists + escalates on WARN; control_plane always escalates on approve; unknown treated as mutating + escalate; operator override always persists).
+- `shouldApprove()` convenience wrapper for fast-path checks.
 
 ### BD-7. Concurrency write policy for steward_runtime_state (blocks Workstream A)
 `steward_runtime_state` is a singleton row. Under concurrent web requests, two requests to the same session could race to update it. Options:
@@ -2162,13 +2166,11 @@ Claude: ran `vitest run src/agents/system-prompt.test.ts src/agents/system-promp
 
 ## Current tasks
 
-Current phase: **WS-E merged to main (PR #5); BD-8 resolved; WS-D blocked on BD-6 only.**
+Current phase: **WS-E merged to main (PR #5); BD-6, BD-8 resolved; WS-D fully unblocked.**
 
 Immediate next tasks:
-1. **Resolve BD-6** — sole remaining WS-D blocker before analyze→implement
-2. **Codex: STEWARD2 IMPLEMENT WS-D** — once BD-6 resolved
+1. **Codex: STEWARD2 IMPLEMENT WS-D** — all blockers resolved (BD-4, BD-6, BD-8)
 
 Not yet approved:
-- Workstream D before BD-6 is resolved
-- Workstream D acceptance before BD-6 is resolved
+- WS-D acceptance before full consequence gate implementation is verified
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
