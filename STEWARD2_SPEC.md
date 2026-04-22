@@ -571,7 +571,7 @@ This board is the single glanceable source of implementation readiness.
 | --- | --- | --- | --- | --- |
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
-| C | Proof judge | `confirm` | `yes` | reviewed: PASS; advancement gate pending |
+| C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
 | D | Consequence logic | `analyze` | `no` | `BD-6`, `BD-8` still open; `BD-4` resolved; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `implement` | `yes` | resolved: `BD-4`; depends on `A` (confirmed); LLM-scored parts now unblocked |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
@@ -2110,22 +2110,28 @@ Verification evidence:
 - memory-store compatibility evidence: `knowledge-store.test.ts` passes unchanged under the new WS-C schema/memory usage, showing no regression in the shared steward knowledge layer
 - static verification: `corepack pnpm exec tsc --noEmit` — pass
 
-Verdict: **PASS.** WS-C acceptance evidence is satisfied for focused proof tests, runtime completion ordering, shared knowledge-store compatibility, and TypeScript integrity. Workstream C is ready for Claude's Advancement gate decision.
+Verdict: **PASS.**
 
-Not claimed yet:
-- no Review gate output yet
-- no Advancement gate decision yet
+### Review gate output
+Reviewer (Claude): read `proof-judge.ts`, `proof-examples.ts`, `novel-flag.ts`, `proof-judge.test.ts`, `session-store.ts`.
+
+Verdict: **PASS.**
+
+### Advancement gate output
+Claude: ran `vitest run src/steward/proof/proof-judge.test.ts` — 1 file, 3 tests, 3 passed.
+
+**ADVANCE.** WS-C merges to main.
 
 ---
 
 ## Current tasks
 
-Current phase: **WS-C verified on `ws-c` and ready for Claude's Advancement gate decision; WS-E remains code-ready; WS-D still blocked on BD-6 and BD-8**.
+Current phase: **WS-C advance-ready; merging ws-c → main. WS-E is next code-ready workstream. WS-D still blocked on BD-6 and BD-8.**
 
 Immediate next tasks:
-1. **Claude: Advancement gate decision for `WS-C`**
-2. if approved: **Claude updates status board / next active workstream**
-3. next implementation opens only after the advancement decision is written
+1. **Codex: merge `ws-c` → `main` via PR #4** ← in progress
+2. **Codex: implement WS-E** (stewardship mission / operator hierarchy; code-ready after BD-4 resolved)
+3. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:
