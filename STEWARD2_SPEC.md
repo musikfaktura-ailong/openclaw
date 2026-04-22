@@ -2056,14 +2056,37 @@ Next: Codex merges `ws-b` → `main` via PR.
 
 ---
 
+## Workstream C handoff record
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/proof/proof-types.ts`, `src/steward/proof/proof-schema.ts`, `src/steward/proof/proof-history.ts`, `src/steward/proof/proof-examples.ts`, `src/steward/proof/novel-flag.ts`, `src/steward/proof/proof-judge.ts`, `src/steward/proof/proof-judge.test.ts`, and `src/steward/db/migrations/0003_proof.sql`. Modified `src/steward/runtime/session-bridge.ts`, `src/agents/command/session-store.ts`, `src/steward/db/runtime-schema.ts`, and `src/steward/runtime/ws-a.integration.test.ts`.
+
+Implemented invariant:
+- proof judgment is now a host-owned completion seam executed before `runtime.idle` is recorded
+- proof verdicts persist in `steward_proofs`
+- labeled proof examples persist through the steward knowledge store plus `steward_proof_examples`
+- novel high-confidence proofs append a distinct labeled example and emit `novel_claim.flagged`
+- the BD-4 model seam is injectable; empty/minimal configs short-circuit to deterministic fallback instead of probing auth indefinitely
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec tsc --noEmit` — pass
+- `corepack pnpm exec vitest run src/steward/proof/proof-judge.test.ts src/steward/runtime/ws-a.integration.test.ts --reporter=verbose` — pass (`2` files, `7` tests)
+
+Not claimed yet:
+- no Review gate output yet
+- no formal Verification gate output yet
+- no Advancement gate decision yet
+
+---
+
 ## Current tasks
 
-Current phase: **WS-B and WS-G advance-ready (merge pending); WS-C and WS-E code-ready; WS-D still blocked on BD-6 and BD-8**.
+Current phase: **WS-C implemented on `ws-c` and ready for Review gate; WS-E remains code-ready; WS-D still blocked on BD-6 and BD-8**.
 
 Immediate next tasks:
-1. **Codex: merge `ws-b` → `main` via PR**
-2. **Codex: merge `ws-g` → `main` via PR**
-3. **Codex: open WS-C implementation** (proof judge) — code-ready; BD-4 resolved; depends on A, B, G all confirmed
+1. **Claude: `STEWARD2 REVIEW WS-C`**
+2. if review passes: **Codex: `STEWARD2 VERIFY WS-C`**
+3. if verification confirms: **Claude: `STEWARD2 APPROVE WS-C → WS-E`**
 4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
 
 Not yet approved:

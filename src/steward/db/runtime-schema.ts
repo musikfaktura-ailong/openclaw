@@ -32,7 +32,10 @@ export type StewardEventKind =
   | "flow.completed"
   | "tool.precheck.blocked"
   | "truth.claim_record"
-  | "truth.candidate_decision";
+  | "truth.candidate_decision"
+  | "proof.accepted"
+  | "proof.rejected"
+  | "novel_claim.flagged";
 
 export type StewardRuntimeStateRow = {
   sessionKey: string;

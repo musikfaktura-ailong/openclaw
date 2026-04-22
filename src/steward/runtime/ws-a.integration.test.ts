@@ -56,7 +56,7 @@ describe("WS-A steward runtime authority", () => {
         .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'steward_%'`)
         .all() as Array<{ name: string }>;
 
-      expect(version.user_version).toBe(2);
+      expect(version.user_version).toBe(3);
       expect(tables.map((row) => row.name).sort()).toEqual(
         expect.arrayContaining([
           "steward_blockers",
@@ -145,6 +145,8 @@ describe("WS-A steward runtime authority", () => {
           meta: {
             durationMs: 1,
             aborted: false,
+            finalAssistantVisibleText:
+              "Evidence recorded from the inbound turn started event confirms the agent turn completed successfully.",
           },
         } as never,
       });
@@ -172,7 +174,11 @@ describe("WS-A steward runtime authority", () => {
       expect(runtimeAfterComplete.active_flow_id).toBeNull();
       expect(runtimeAfterComplete.active_task_id).toBeNull();
       expect(flow.status).toBe("completed");
-      expect(events.map((row) => row.kind)).toEqual(["runtime.started", "runtime.idle"]);
+      expect(events.map((row) => row.kind)).toEqual([
+        "runtime.started",
+        "proof.accepted",
+        "runtime.idle",
+      ]);
     });
   });
 });

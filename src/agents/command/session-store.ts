@@ -12,6 +12,7 @@ import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { isCliProvider } from "../model-selection.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../usage.js";
 import { recordTurnComplete } from "../../steward/runtime/runtime-bridge.js";
+import { createSimpleCompletionStewardClassifier } from "../../steward/proof/proof-judge.js";
 
 type RunResult = Awaited<ReturnType<(typeof import("../pi-embedded.js"))["runEmbeddedPiAgent"]>>;
 
@@ -26,6 +27,18 @@ async function getUsageFormatModule() {
 async function getContextModule() {
   contextModulePromise ??= import("../context.js");
   return await contextModulePromise;
+}
+
+function resolveProofCandidateText(result: RunResult): string {
+  const visible = result.meta.finalAssistantVisibleText?.trim();
+  if (visible) {
+    return visible;
+  }
+  return (result.payloads ?? [])
+    .filter((payload) => !payload.isError && !payload.isReasoning)
+    .map((payload) => payload.text?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function resolveNonNegativeNumber(value: number | undefined): number | undefined {
@@ -154,11 +167,18 @@ export async function updateSessionStoreAfterAgentRun(params: {
     return merged;
   });
   sessionStore[sessionKey] = persisted;
+  const stewardClassifier = await createSimpleCompletionStewardClassifier({
+    cfg,
+  });
   await recordTurnComplete({
     storePath,
     sessionKey,
     result: {
       aborted: result.meta.aborted ?? false,
+      finalAssistantText: resolveProofCandidateText(result),
+      taskTitle: "Agent turn completion",
+      taskType: "general",
+      classifier: stewardClassifier,
     },
   });
 }
