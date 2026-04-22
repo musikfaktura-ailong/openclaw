@@ -572,7 +572,7 @@ This board is the single glanceable source of implementation readiness.
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
-| D | Consequence logic | `analyze` | `no` | `BD-6`, `BD-8` still open; `BD-4` resolved; depends on `A`, `F`, `G` |
+| D | Consequence logic | `analyze` | `no` | `BD-6` still open; `BD-4`, `BD-8` resolved; depends on `A`, `F`, `G` |
 | E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | phase 1 verified: PASS; advancement gate: ADVANCE |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
@@ -1776,7 +1776,7 @@ This mapping must be written as a static artifact in `src/steward/consequence/to
 - checked tools (LLM negation classification required)
 - OpenClaw exec/plugin/control-plane tool classes
 
-Decision: **OPEN** — requires enumerating OpenClaw tool IDs from `src/acp/approval-classifier.ts` and `src/agents/`
+Decision: **RESOLVED** — `src/steward/consequence/tool-taxonomy.ts` written. Sources enumerated: `tool-catalog.ts` (31 core tool IDs), `tool-mutation.ts`, `tool-policy.ts`, `tool-policy-shared.ts`, `acp/approval-classifier.ts`. All five required consequence classes covered: `fast_pass`, `always_allow`, `truth_gated`, `checked`, `exec`, plus `control_plane` and `plugin` for OpenClaw-specific classes. `resolveConsequenceClass()` handles conditionally-mutating tools and plugin registry fallback. Transpile clean.
 
 ## PEQS modules — assessed verdicts
 
@@ -2162,16 +2162,13 @@ Claude: ran `vitest run src/agents/system-prompt.test.ts src/agents/system-promp
 
 ## Current tasks
 
-Current phase: **WS-E advance-ready; merge ws-e → main. WS-D still blocked on BD-6 and BD-8.**
+Current phase: **WS-E merged to main (PR #5); BD-8 resolved; WS-D blocked on BD-6 only.**
 
 Immediate next tasks:
-1. **Codex: merge `ws-e` → `main` via PR**
-2. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
-3. resolve BD-8 before WS-D starts; write `tool-taxonomy.ts` artifact
-4. resolve BD-8 before Workstream D starts; write `tool-taxonomy.ts` artifact
+1. **Resolve BD-6** — sole remaining WS-D blocker before analyze→implement
+2. **Codex: STEWARD2 IMPLEMENT WS-D** — once BD-6 resolved
 
 Not yet approved:
-- direct code port of downstream workstreams beyond the active Workstream F slice
-- `postcheck()` result normalization (from `tool_supervisor.py`): must be implemented as `src/steward/tool/postcheck-rules.ts` before Workstream B (truth audit) or Workstream D (consequence logic) consumes normalized tool output artifacts
-- Workstream D before `BD-8` and `BD-6` are resolved
-- Workstream D before `BD-8` is resolved, and Workstream D acceptance before `BD-6` is resolved
+- Workstream D before BD-6 is resolved
+- Workstream D acceptance before BD-6 is resolved
+- `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
