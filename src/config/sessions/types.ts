@@ -477,6 +477,12 @@ export type SessionSystemPromptReport = {
     mode?: string;
     sandboxed?: boolean;
   };
+  steward?: {
+    policyVersion: string;
+    coreHash: string;
+    sourceHash: string;
+    injected: boolean;
+  };
   systemPrompt: {
     chars: number;
     projectContextChars: number;

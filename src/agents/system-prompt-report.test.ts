@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSystemPromptReport } from "./system-prompt-report.js";
+import { STEWARDSHIP_CORE_POLICY_VERSION } from "../steward/mission/stewardship-core.js";
 import type { WorkspaceBootstrapFile } from "./workspace.js";
 
 function makeBootstrapFile(overrides: Partial<WorkspaceBootstrapFile>): WorkspaceBootstrapFile {
@@ -91,6 +92,36 @@ describe("buildSystemPromptReport", () => {
     });
 
     expect(report.tools.listChars).toBe(0);
+  });
+
+  it("includes inspectable stewardship mission metadata", () => {
+    const file = makeBootstrapFile({ path: "/tmp/workspace/policies/AGENTS.md" });
+    const report = makeReport({
+      file,
+      injectedPath: "AGENTS.md",
+      injectedContent: "trimmed",
+    });
+
+    expect(report.steward?.policyVersion).toBe(STEWARDSHIP_CORE_POLICY_VERSION);
+    expect(report.steward?.coreHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(report.steward?.sourceHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(report.steward?.injected).toBe(false);
+  });
+
+  it("detects when the steward mission core is present in the system prompt", () => {
+    const file = makeBootstrapFile({ path: "/tmp/workspace/policies/AGENTS.md" });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: "header\n\n## Stewardship Core\nPolicy version: steward-core-v1",
+      bootstrapFiles: [file],
+      injectedFiles: [{ path: "AGENTS.md", content: "trimmed" }],
+      skillsPrompt: "",
+      tools: [],
+    });
+
+    expect(report.steward?.injected).toBe(true);
   });
 
   it("reports injectedChars=0 when injected file does not match by path or basename", () => {
