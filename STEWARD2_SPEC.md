@@ -572,7 +572,7 @@ This board is the single glanceable source of implementation readiness.
 | A | DB runtime authority | `advance-ready` | `yes` | resolved: `BD-1`, `BD-2`, `BD-5`, `BD-7` |
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
-| D | Consequence logic | `confirm` | `yes` | implementation + Codex verification complete on `ws-d`; next gate is reviewer confirmation |
+| D | Consequence logic | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merged ws-d → main in PR #6 |
 | E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | phase 1 verified: PASS; advancement gate: ADVANCE |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
@@ -2197,10 +2197,12 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-D implemented on `ws-d`; Codex verification passed; waiting for reviewer gate.**
+Current phase: **WS-D merged to main (PR #6); non-blocking WS-D follow-ups carried forward.**
 
 Immediate next tasks:
-1. **Claude: review WS-D** — consequence host seam, truth gate, override persistence, and event evidence are ready for reviewer confirmation
+1. **Select next workstream** — no new implementation starts until the next workstream is explicitly selected through the Steward2 process
 
 Not yet approved:
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
+- Finding 1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring
+- Finding 2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY` so provenance/confidence gate is reachable through the simulator
