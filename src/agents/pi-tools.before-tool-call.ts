@@ -5,6 +5,7 @@ import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { copyPluginToolMeta } from "../plugins/tools.js";
 import { PluginApprovalResolutions, type PluginApprovalResolution } from "../plugins/types.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
+import { evaluateConsequencePolicy } from "../steward/consequence/consequence-simulator.js";
 import { isPlainObject } from "../utils.js";
 import { precheckToolCall } from "../steward/tool/tool-supervisor.js";
 import { copyChannelAgentToolMeta } from "./channel-tools.js";
@@ -105,6 +106,37 @@ function formatPrecheckBlockReason(params: {
     return `Reroute to ${params.rerouteToolName}: ${params.reason}`;
   }
   return params.reason;
+}
+
+async function runConsequenceGate(args: {
+  toolName: string;
+  params: unknown;
+  ctx?: HookContext;
+}): Promise<HookOutcome> {
+  const consequence = await evaluateConsequencePolicy({
+    toolName: args.toolName,
+    args: args.params,
+    sessionKey: args.ctx?.sessionKey,
+  });
+
+  if (consequence.recommendation === "REFUSE") {
+    return {
+      blocked: true,
+      reason: consequence.annotation || `${args.toolName} refused by steward consequence policy`,
+    };
+  }
+
+  if (consequence.recommendation === "REROUTE") {
+    const prefix = consequence.rerouteToolName
+      ? `Reroute to ${consequence.rerouteToolName}: `
+      : "";
+    return {
+      blocked: true,
+      reason: `${prefix}${consequence.annotation || `${args.toolName} rerouted by steward consequence policy`}`,
+    };
+  }
+
+  return { blocked: false, params: args.params };
 }
 
 async function recordLoopOutcome(args: {
@@ -219,7 +251,11 @@ export async function runBeforeToolCallHook(args: {
         }),
       };
     }
-    return { blocked: false, params: args.params };
+    return runConsequenceGate({
+      toolName,
+      params: args.params,
+      ctx: args.ctx,
+    });
   }
 
   try {
@@ -411,10 +447,11 @@ export async function runBeforeToolCallHook(args: {
           }),
         };
       }
-      return {
-        blocked: false,
+      return runConsequenceGate({
+        toolName,
         params: mergedParams,
-      };
+        ctx: args.ctx,
+      });
     }
   } catch (err) {
     const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
@@ -446,7 +483,11 @@ export async function runBeforeToolCallHook(args: {
     };
   }
 
-  return { blocked: false, params };
+  return runConsequenceGate({
+    toolName,
+    params,
+    ctx: args.ctx,
+  });
 }
 
 export function wrapToolWithBeforeToolCallHook(
