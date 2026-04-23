@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **implement Workstream A**.
+Current phase: **WS-E remaining modules opened by spec gate; WS-D non-blocking follow-ups carried forward.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -573,7 +573,7 @@ This board is the single glanceable source of implementation readiness.
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
 | D | Consequence logic | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merged ws-d → main in PR #6 |
-| E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | phase 1 verified: PASS; advancement gate: ADVANCE |
+| E | Stewardship mission / operator hierarchy | `implement` | `yes` | remaining modules opened by spec gate; depends on A and G, both satisfied |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
@@ -2162,6 +2162,34 @@ Claude: ran `vitest run src/agents/system-prompt.test.ts src/agents/system-promp
 
 **ADVANCE.** WS-E phase 1 merges to main.
 
+### Spec gate output — remaining modules
+Architect: Workstream E remaining modules are now opened for implementation after WS-D merge. Invariant remains: steward identity, mission hierarchy, time budget, task value, reflection, drift audit, goals, and heuristics must be structurally owned by `src/steward/mission/*` and must not degrade to generic assistant behavior or prompt-only persona text.
+
+Scope:
+- `operator-hierarchy.ts` — stewardship > research > revenue; task yields to mission, not the reverse
+- `time-budget.ts` — DB-backed two-mode time budget, reward, burn, and penalty policy using `steward_kv`
+- `stewardship-reflection.ts` — post-task quality grading across truth, operator service, burden, continuity, discretion, contradiction surfacing, truthful refusal, and busywork
+- `task-value.ts` — value scoring and labels; must call stewardship reflection before final value adjudication
+- `stewardship-audit.ts` — weekly/monthly drift reports over DB events and relationship memory
+- `goals-registry.ts` — opportunity categories, research phase templates, category diversity policy
+- `heuristics.ts` — confidence/frustration/curiosity state machine, decay tick, prompt context, force-research gate
+
+Required ordering inside WS-E remaining:
+- implement `stewardship-reflection.ts` before `task-value.ts`
+- implement `time-budget.ts` before modules that apply reward/burn/penalty outcomes
+- implement `operator-hierarchy.ts` before runtime hooks consume mission decisions
+- do not implement Workstream H until E remaining modules pass review and advancement
+
+Dependencies resolved:
+- Workstream A provides DB runtime authority, events, and `steward_kv`
+- Workstream G provides relationship memory / knowledge store for drift and operator context
+- Workstream E phase 1 provides canonical `stewardship-core.ts` prompt/policy constants
+
+WS-D follow-ups carried forward, not part of WS-E implementation:
+- `postcheck()` result normalization remains a tool/consequence follow-up
+- `action-policy-bridge.ts` shim/spec-location note remains a WS-D follow-up
+- `knowledge_store: "truth_gated"` in `TOOL_TAXONOMY` remains a WS-D follow-up
+
 ---
 
 ## Workstream D handoff record
@@ -2197,10 +2225,10 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-D merged to main (PR #6); non-blocking WS-D follow-ups carried forward.**
+Current phase: **WS-E remaining modules opened by spec gate; WS-D non-blocking follow-ups carried forward.**
 
 Immediate next tasks:
-1. **Select next workstream** — no new implementation starts until the next workstream is explicitly selected through the Steward2 process
+1. **Codex: STEWARD2 IMPLEMENT WS-E-REMAINING** — implement the opened Workstream E remaining modules in the required internal order
 
 Not yet approved:
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
