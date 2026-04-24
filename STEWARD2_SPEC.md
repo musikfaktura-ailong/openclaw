@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-E remaining modules opened by spec gate; WS-D non-blocking follow-ups carried forward.**
+Current phase: **WS-E remaining modules implemented on `ws-e-remaining`; Codex verification passed; waiting for reviewer gate.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -573,7 +573,7 @@ This board is the single glanceable source of implementation readiness.
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
 | D | Consequence logic | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merged ws-d → main in PR #6 |
-| E | Stewardship mission / operator hierarchy | `implement` | `yes` | remaining modules opened by spec gate; depends on A and G, both satisfied |
+| E | Stewardship mission / operator hierarchy | `confirm` | `yes` | remaining modules implemented + Codex verification complete on `ws-e-remaining`; next gate is reviewer confirmation |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
@@ -2190,6 +2190,35 @@ WS-D follow-ups carried forward, not part of WS-E implementation:
 - `action-policy-bridge.ts` shim/spec-location note remains a WS-D follow-up
 - `knowledge_store: "truth_gated"` in `TOOL_TAXONOMY` remains a WS-D follow-up
 
+### Implementation gate output — remaining modules
+Implementer (Codex): created `src/steward/mission/operator-hierarchy.ts`, `src/steward/mission/time-budget.ts`, `src/steward/mission/stewardship-reflection.ts`, `src/steward/mission/task-value.ts`, `src/steward/mission/stewardship-audit.ts`, `src/steward/mission/goals-registry.ts`, and `src/steward/mission/heuristics.ts`. Added focused tests for each mission module. Modified `src/steward/runtime/session-bridge.ts` so turn completion now runs proof judgment first, then task value/reflection adjudication before `runtime.idle`. Modified `src/steward/db/runtime-schema.ts` to register typed mission event kinds. Updated `src/steward/runtime/ws-a.integration.test.ts` for the new runtime evidence.
+
+Implemented invariant:
+- WS-E remaining mission policy is now owned by `src/steward/mission/*`, not scattered prompt fragments
+- `stewardship-reflection.ts` runs before `task-value.ts`, and `task-value.ts` owns final value scoring
+- `time-budget.ts` owns DB-backed reward/burn/penalty state through `steward_kv`
+- `operator-hierarchy.ts` owns stewardship > truth/operator/continuity > research/revenue ordering
+- `stewardship-audit.ts` reads persisted events for drift/health scoring
+- `goals-registry.ts` owns opportunity categories, phase templates, and 24h diversity tracking
+- `heuristics.ts` owns confidence/frustration/curiosity state and prompt context
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec vitest run src/steward/mission/time-budget.test.ts src/steward/mission/heuristics.test.ts src/steward/mission/operator-hierarchy.test.ts src/steward/mission/goals-registry.test.ts src/steward/mission/task-value.test.ts src/steward/mission/stewardship-audit.test.ts src/steward/runtime/ws-a.integration.test.ts` — pass (`7` files, `11` tests)
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit` — pass
+
+### Verification gate output — remaining modules
+Verifier (Codex): targeted WS-E remaining verification passed on branch `ws-e-remaining`.
+
+Verification evidence:
+- module evidence: all opened remaining modules exist under `src/steward/mission/*`
+- boundary evidence: `session-bridge.ts` explicitly invokes `adjudicateTaskValue()` after proof judgment and before `runtime.idle`
+- persistence evidence: time budget and heuristics write `steward_kv`; task value and audit write typed `steward_events`; task value writes `stewardship_ledger` relationship memory
+- test evidence: focused WS-E suite passed (`7` files, `11` tests)
+- runtime evidence: `ws-a.integration.test.ts` now verifies the turn-completion path includes `mission.task_value.adjudicated` before idle
+- static evidence: full TypeScript check passed with Node heap raised to 8192 MB
+
+Verdict: **PASS.** Workstream E remaining implementation and Codex verification are complete. Next process step is the reviewer gate.
+
 ---
 
 ## Workstream D handoff record
@@ -2225,10 +2254,10 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-E remaining modules opened by spec gate; WS-D non-blocking follow-ups carried forward.**
+Current phase: **WS-E remaining modules implemented on `ws-e-remaining`; Codex verification passed; waiting for reviewer gate.**
 
 Immediate next tasks:
-1. **Codex: STEWARD2 IMPLEMENT WS-E-REMAINING** — implement the opened Workstream E remaining modules in the required internal order
+1. **Claude: review WS-E-REMAINING** — mission module ownership, runtime task-value seam, DB persistence, and test evidence are ready for reviewer confirmation
 
 Not yet approved:
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts

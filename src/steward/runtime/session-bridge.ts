@@ -11,6 +11,7 @@ import { getOrCreateStewardSession } from "./session-authority.js";
 import { projectSessionToCompatibilityStore } from "./session-projection.js";
 import { judgeAndPersistProof } from "../proof/proof-judge.js";
 import type { ProofTaskType, StewardClassifier } from "../proof/proof-types.js";
+import { adjudicateTaskValue } from "../mission/task-value.js";
 
 export async function recordInboundTurnStart(params: {
   storePath: string;
@@ -75,6 +76,22 @@ export async function recordTurnComplete(params: {
             details: params.result?.taskDetails ?? "",
           },
         });
+  const taskValueResult =
+    params.result?.aborted === true
+      ? null
+      : await adjudicateTaskValue({
+          sessionId: authority.sessionId,
+          sessionKey: params.sessionKey,
+          flowId: current?.activeFlowId ?? null,
+          taskId: params.result?.taskId ?? null,
+          taskType: params.result?.taskType ?? "general",
+          taskTitle: params.result?.taskTitle ?? "Agent turn completion",
+          taskDetails: params.result?.taskDetails ?? "",
+          taskResult: params.result?.finalAssistantText ?? "",
+          proofVerdict: proofResult?.verdict ?? null,
+          proofScore: proofResult?.score ?? null,
+          now,
+        });
   completeRuntimeFlow({
     flowId: current?.activeFlowId,
     taskId: current?.activeTaskId,
@@ -93,6 +110,8 @@ export async function recordTurnComplete(params: {
       proofId: proofResult?.proofId ?? null,
       proofVerdict: proofResult?.verdict ?? null,
       proofScore: proofResult?.score ?? null,
+      taskValueScore: taskValueResult?.score ?? null,
+      taskValueLabel: taskValueResult?.label ?? null,
     },
     now,
   });

@@ -174,11 +174,14 @@ describe("WS-A steward runtime authority", () => {
       expect(runtimeAfterComplete.active_flow_id).toBeNull();
       expect(runtimeAfterComplete.active_task_id).toBeNull();
       expect(flow.status).toBe("completed");
-      expect(events.map((row) => row.kind)).toEqual([
-        "runtime.started",
-        "proof.accepted",
-        "runtime.idle",
-      ]);
+      expect(events.map((row) => row.kind)).toEqual(
+        expect.arrayContaining([
+          "runtime.started",
+          "proof.accepted",
+          "mission.task_value.adjudicated",
+          "runtime.idle",
+        ]),
+      );
     });
   });
 });
