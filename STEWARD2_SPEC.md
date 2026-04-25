@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-E remaining modules implemented on `ws-e-remaining`; Codex verification passed; waiting for reviewer gate.**
+Current phase: **WS-H implemented and verified on branch `ws-h`. Waiting for reviewer gate.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -573,10 +573,10 @@ This board is the single glanceable source of implementation readiness.
 | B | Truth audit | `advance-ready` | `yes` | reviewed + advanced: PASS; merge ws-b → main |
 | C | Proof judge | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merging ws-c → main |
 | D | Consequence logic | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merged ws-d → main in PR #6 |
-| E | Stewardship mission / operator hierarchy | `confirm` | `yes` | remaining modules implemented + Codex verification complete on `ws-e-remaining`; next gate is reviewer confirmation |
+| E | Stewardship mission / operator hierarchy | `advance-ready` | `yes` | reviewed: PASS; advancement gate: ADVANCE; merged ws-e-remaining → main in PR #7 |
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
-| H | Maintenance governor / metacog monitor | `analyze` | `no` | depends on `A`, `E`, `G`; no local blocker beyond upstream readiness |
+| H | Maintenance governor / metacog monitor | `implement` | `yes` | depends on `A`, `E`, `G` — all `advance-ready`; opened for implementation 2026-04-24 |
 
 Interpretation:
 - `Current state` must be one of `analyze`, `implement`, `confirm`, or `advance-ready`
@@ -2219,6 +2219,47 @@ Verification evidence:
 
 Verdict: **PASS.** Workstream E remaining implementation and Codex verification are complete. Next process step is the reviewer gate.
 
+### Reviewer gate output — remaining modules
+
+Reviewer (Claude): reviewed mission module ownership, runtime task-value seam, DB persistence, and test evidence on `ws-e-remaining`.
+
+Review findings:
+
+1. **Module ownership** — all 7 spec-named modules present under `src/steward/mission/*`: `operator-hierarchy.ts`, `time-budget.ts`, `stewardship-reflection.ts`, `task-value.ts`, `stewardship-audit.ts`, `goals-registry.ts`, `heuristics.ts`. PASS.
+2. **Runtime task-value seam** — `session-bridge.ts` explicitly calls `judgeAndPersistProof()` → `adjudicateTaskValue()` → `completeRuntimeFlow()` → `markRuntimeIdle()`. Value adjudication is structurally ordered: reflection runs first inside `adjudicateTaskValue()`, then value scoring, then idle. `ws-a.integration.test.ts` confirms event sequence: `runtime.started` → `proof.accepted` → `mission.task_value.adjudicated` → `runtime.idle`. PASS.
+3. **DB persistence** — `time-budget.ts` uses `steward_kv` for reward/burn/penalty state; `heuristics.ts` uses `steward_kv` for confidence/frustration/curiosity. `task-value.ts` writes `stewardship_ledger` relationship memory and emits `mission.task_value.adjudicated` events. PASS.
+4. **Test evidence** — 7-file, 11-test suite passes on `ws-e-remaining`. PASS.
+5. **Static evidence** — full TypeScript check passes. PASS.
+
+Non-blocking findings (do not block ADVANCE; carry to WS-H pre-conditions):
+- **Finding E-1** — `evaluateOperatorHierarchy()` and `hierarchyPromptContext()` in `operator-hierarchy.ts` are implemented but unwired: no call site in `session-bridge.ts` or `system-prompt.ts` routes through them. The hierarchy is defined but not injected into the prompt context. Track as WS-H pre-condition: wire or document as intentionally deferred.
+- **Finding E-2** — `value-scorer.ts` (injectable classifier seam for WS-E, listed in spec at line 1683) is absent. The seam point in `attempt.ts` is documented but the adapter module does not exist. Track as WS-H pre-condition.
+
+Verdict: **PASS.** All 5 structural criteria met. Two non-blocking findings carried forward.
+
+### Advancement gate — remaining modules
+
+Architect (Claude): **ADVANCE.** WS-E remaining modules pass review. Non-blocking findings E-1 and E-2 are documented as WS-H pre-conditions.
+
+Merge instruction to Codex:
+```
+Merge the branch `ws-e-remaining` into `main`.
+Commit message: `WS-E merge: stewardship mission remaining modules`
+Squash-merge. Do not rebase. Confirm PR #7 after merge.
+```
+
+### WS-E post-merge status (2026-04-24)
+
+Merge confirmed: PR #7 merged `ws-e-remaining` → `main`. Commit `6f43990984`.
+
+WS-E is `advance-ready`. All 8 spec-named mission modules are on `main`:
+- `stewardship-core.ts` (phase 1, merged earlier)
+- `operator-hierarchy.ts`, `time-budget.ts`, `task-value.ts`, `stewardship-reflection.ts`, `stewardship-audit.ts`, `goals-registry.ts`, `heuristics.ts` (WS-E remaining, PR #7)
+
+WS-H pre-conditions inherited from WS-E findings:
+- E-1: wire `evaluateOperatorHierarchy()` / `hierarchyPromptContext()` into prompt context, or document as intentionally deferred in WS-H spec
+- E-2: implement `src/steward/mission/value-scorer.ts` injectable classifier seam before WS-H closes
+
 ---
 
 ## Workstream D handoff record
@@ -2254,12 +2295,109 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-E remaining modules implemented on `ws-e-remaining`; Codex verification passed; waiting for reviewer gate.**
+Current phase: **WS-H implemented and verified on branch `ws-h`. Waiting for reviewer gate.**
 
 Immediate next tasks:
-1. **Claude: review WS-E-REMAINING** — mission module ownership, runtime task-value seam, DB persistence, and test evidence are ready for reviewer confirmation
+1. **Claude: review WS-H** — read the WS-H handoff below and review module ownership, runtime control seam, budget enforcement, prompt injection, DB persistence, and test evidence. Return PASS/FAIL with structural findings only.
 
-Not yet approved:
+Carry-forward (not yet approved, does not block reviewer gate):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
-- Finding 1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring
-- Finding 2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY` so provenance/confidence gate is reachable through the simulator
+- Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring
+- Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY` so provenance/confidence gate is reachable through the simulator
+
+WS-H pre-conditions:
+- E-1 resolved in `src/steward/memory/prompt-context.ts`
+- E-2 resolved in `src/steward/mission/value-scorer.ts` and `src/agents/pi-embedded-runner/run/attempt.ts`
+
+### Workstream H — implementation gate
+
+Implementer (Codex): implement the WS-H maintenance governor and metacog monitor on branch `ws-h`.
+
+**Scope — exactly these 4 modules under `src/steward/control/`:**
+- `maintenance-governor.ts` — rule-based event observer; root cause classifier (task_design_issue, planner_issue, research_deficit, tool_misuse, strategy_defect, stewardship_drift); intervention seeder (hint_patch, reroute_task, diagnostic_task, strategy_reset); DB pruner (old events/knowledge/tasks on weekly/monthly schedule); delegates budget enforcement to `control-budget.ts`
+- `metacog-monitor.ts` — anomaly detector: SPIN (> 50 identical events in 60s), STAGNATION (no proofs > 2h), FRUSTRATION (> 5 consecutive failed tasks); seeds analysis tasks on anomaly; checks budget before seeding
+- `control-budget.ts` — shared control budget tracker: max 3 control tasks per 24h window, max 20% of total tasks; used by both governor and metacog; DB-backed via `steward_kv`
+- `self-improvement.ts` — failure pattern analysis by normalized title group (min 3 attempts, > 50% failure rate); builds corrective hints from common error messages and proven tool sequences; 3600s cooldown per title group via `steward_kv`; revenue/trading drift markers stripped — replaced with stewardship drift from `stewardship-audit.ts`
+
+**PEQS source modules to port:**
+- `C:\ai_agent\PEQS\core\maintenance_governor.py`
+- `C:\ai_agent\PEQS\core\metacog_monitor.py`
+- `C:\ai_agent\PEQS\core\self_improvement.py`
+
+**WS-H pre-conditions to resolve during implementation:**
+- Finding E-1: wire `evaluateOperatorHierarchy()` / `hierarchyPromptContext()` into the system prompt context (or document as intentionally deferred with explicit rationale in this spec)
+- Finding E-2: implement `src/steward/mission/value-scorer.ts` — injectable classifier seam stub; injection point is `src/agents/pi-embedded-runner/run/attempt.ts`
+
+**Acceptance (must all pass before reviewer gate):**
+- SPIN detected within 60s of > 50 identical events; analysis task seeded within 1 control budget slot
+- STAGNATION detected after 2h without proofs; corrective task seeded
+- control budget enforced: no more than 3 governor/metacog tasks per 24h window, no more than 20% ratio
+- DB pruning runs on schedule without operator action; prune events respect retention policy
+- WS-H pre-conditions E-1 and E-2 resolved before review gate
+
+**Tests required:**
+- `src/steward/control/control-budget.test.ts`
+- `src/steward/control/metacog-monitor.test.ts`
+- `src/steward/control/maintenance-governor.test.ts`
+- `src/steward/control/self-improvement.test.ts`
+
+**Codex prompt:**
+```
+Branch: ws-h
+Base: main (after PR #7 ws-e-remaining merge)
+
+Implement Workstream H: Maintenance governor and metacog monitor.
+
+Create exactly these modules under src/steward/control/:
+  - maintenance-governor.ts
+  - metacog-monitor.ts
+  - control-budget.ts
+  - self-improvement.ts
+
+Port from PEQS source:
+  - C:\ai_agent\PEQS\core\maintenance_governor.py
+  - C:\ai_agent\PEQS\core\metacog_monitor.py
+  - C:\ai_agent\PEQS\core\self_improvement.py
+
+Also resolve WS-H pre-conditions before closing:
+  - E-1: wire evaluateOperatorHierarchy() / hierarchyPromptContext() into system prompt context OR document as intentionally deferred with explicit rationale in STEWARD2_SPEC.md
+  - E-2: implement src/steward/mission/value-scorer.ts injectable classifier seam stub with injection point at src/agents/pi-embedded-runner/run/attempt.ts
+
+Full spec: STEWARD2_SPEC.md — Workstream H section and WS-H implementation gate.
+
+On completion, run:
+  corepack pnpm exec vitest run src/steward/control/control-budget.test.ts src/steward/control/metacog-monitor.test.ts src/steward/control/maintenance-governor.test.ts src/steward/control/self-improvement.test.ts
+  node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit
+
+Report all 4 tests passing and TypeScript clean before marking complete.
+```
+
+### Implementation gate output
+Implementer (Codex): created `src/steward/control/maintenance-governor.ts`, `src/steward/control/metacog-monitor.ts`, `src/steward/control/control-budget.ts`, and `src/steward/control/self-improvement.ts`. Added focused tests in `src/steward/control/control-budget.test.ts`, `src/steward/control/metacog-monitor.test.ts`, `src/steward/control/maintenance-governor.test.ts`, and `src/steward/control/self-improvement.test.ts`. Modified `src/steward/runtime/session-bridge.ts` so turn completion now runs task-value adjudication first, then host-owned metacog/governor/self-improvement ticks before `runtime.idle`. Modified `src/steward/memory/prompt-context.ts` to inject hierarchy context plus self-improvement hints into the system prompt seam. Added `src/steward/mission/value-scorer.ts` and wired its prompt seam into `src/agents/pi-embedded-runner/run/attempt.ts`. Modified `src/steward/db/runtime-schema.ts` to register typed control event kinds.
+
+Implemented invariant:
+- WS-H control logic is now owned by `src/steward/control/*`, not dispersed across prompt text or ad hoc runtime branches
+- the host-owned completion order is explicit: `judgeAndPersistProof()` -> `adjudicateTaskValue()` -> `runMetacogMonitorTick()` / `runMaintenanceGovernorTick()` / `runSelfImprovementTick()` -> `runtime.idle`
+- metacog and governor share one DB-backed control budget and seed maintenance work through steward flow/task rows, not planner-owned state
+- self-improvement writes reusable corrective hints into steward DB state and the prompt seam re-injects them on later turns
+- WS-E carry-forward pre-conditions are resolved inside this slice:
+  - E-1: `hierarchyPromptContext()` now enters prompt context through `src/steward/memory/prompt-context.ts`
+  - E-2: `src/steward/mission/value-scorer.ts` exists and is injected from `src/agents/pi-embedded-runner/run/attempt.ts`
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec vitest run src/steward/control/control-budget.test.ts src/steward/control/metacog-monitor.test.ts src/steward/control/maintenance-governor.test.ts src/steward/control/self-improvement.test.ts` — pass (`4` files, `8` tests)
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit` — pass
+
+### Verification gate output
+Verifier (Codex): targeted Workstream H verification passed on branch `ws-h`.
+
+Verification evidence:
+- module evidence: all 4 spec-named WS-H modules exist under `src/steward/control/*`
+- boundary evidence: `session-bridge.ts` now owns the runtime transition from mission adjudication into control analysis before idle, so the planner cannot bypass metacog/governor/self-improvement ticks
+- persistence evidence: control task seeding, anomaly detection, governor interventions, and self-improvement application all emit typed `steward_events`; budget state and hint state persist through `steward_kv`; seeded work persists through `steward_flows` and `steward_flow_tasks`
+- prompt evidence: `prompt-context.ts` injects hierarchy context and DB-backed self-improvement hints; `attempt.ts` injects the value-scorer prompt seam
+- pre-condition evidence: WS-E findings E-1 and E-2 are resolved in code, not deferred
+- test evidence: focused WS-H suite passed (`4` files, `8` tests)
+- static evidence: full TypeScript check passed with Node heap raised to 8192 MB
+
+Verdict: **PASS.** Workstream H implementation and Codex verification are complete. Next process step is the reviewer gate.

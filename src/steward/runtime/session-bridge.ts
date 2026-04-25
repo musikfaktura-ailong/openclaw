@@ -12,6 +12,9 @@ import { projectSessionToCompatibilityStore } from "./session-projection.js";
 import { judgeAndPersistProof } from "../proof/proof-judge.js";
 import type { ProofTaskType, StewardClassifier } from "../proof/proof-types.js";
 import { adjudicateTaskValue } from "../mission/task-value.js";
+import { runMetacogMonitorTick } from "../control/metacog-monitor.js";
+import { runMaintenanceGovernorTick } from "../control/maintenance-governor.js";
+import { runSelfImprovementTick } from "../control/self-improvement.js";
 
 export async function recordInboundTurnStart(params: {
   storePath: string;
@@ -92,6 +95,23 @@ export async function recordTurnComplete(params: {
           proofScore: proofResult?.score ?? null,
           now,
         });
+  const controlResult =
+    params.result?.aborted === true
+      ? null
+      : {
+          metacog: runMetacogMonitorTick({
+            sessionKey: params.sessionKey,
+            now,
+          }),
+          governor: runMaintenanceGovernorTick({
+            sessionKey: params.sessionKey,
+            now,
+          }),
+          selfImprovement: runSelfImprovementTick({
+            sessionId: authority.sessionId,
+            now,
+          }),
+        };
   completeRuntimeFlow({
     flowId: current?.activeFlowId,
     taskId: current?.activeTaskId,
@@ -112,6 +132,7 @@ export async function recordTurnComplete(params: {
       proofScore: proofResult?.score ?? null,
       taskValueScore: taskValueResult?.score ?? null,
       taskValueLabel: taskValueResult?.label ?? null,
+      controlResult,
     },
     now,
   });
