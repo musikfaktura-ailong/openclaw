@@ -1,6 +1,8 @@
 // Seam: pre-prompt steward memory injection runs inside the embedded runner,
 // using the DB-backed relationship memory store rather than ad hoc session text.
+import { hierarchyPromptContext } from "../mission/operator-hierarchy.js";
 import { injectRelationshipContext } from "./relationship-memory.js";
+import { buildSelfImprovementPromptContext } from "../control/self-improvement.js";
 
 export async function buildStewardMemoryPromptContext(params: {
   sessionKey?: string;
@@ -13,7 +15,12 @@ export async function buildStewardMemoryPromptContext(params: {
     sessionKey,
     topK: 6,
   });
-  return context.trim() || undefined;
+  const sections = [
+    hierarchyPromptContext(),
+    buildSelfImprovementPromptContext({ sessionKey }),
+    context.trim() || undefined,
+  ].filter((item): item is string => Boolean(item && item.trim()));
+  return sections.length > 0 ? sections.join("\n\n") : undefined;
 }
 
 export async function mergeStewardMemoryIntoExtraSystemPrompt(params: {

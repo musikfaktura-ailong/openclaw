@@ -25,6 +25,7 @@ import { isAcpSessionKey, isSubagentSessionKey } from "../../../routing/session-
 import { normalizeOptionalLowercaseString } from "../../../shared/string-coerce.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
 import { mergeStewardMemoryIntoExtraSystemPrompt } from "../../../steward/memory/prompt-context.js";
+import { buildValueScorerPromptContext } from "../../../steward/mission/value-scorer.js";
 import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
 import { resolveUserPath } from "../../../utils.js";
 import { normalizeMessageChannel } from "../../../utils/message-channel.js";
@@ -849,7 +850,9 @@ export async function runEmbeddedAttempt(
 
     const stewardExtraSystemPrompt = await mergeStewardMemoryIntoExtraSystemPrompt({
       sessionKey: params.sessionKey,
-      extraSystemPrompt: params.extraSystemPrompt,
+      extraSystemPrompt: [params.extraSystemPrompt, buildValueScorerPromptContext()]
+        .filter((item): item is string => Boolean(item && item.trim()))
+        .join("\n\n"),
     });
 
     const builtAppendPrompt =
