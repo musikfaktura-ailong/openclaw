@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-H merged to `main` via PR #8 on 2026-04-25. Select next follow-up slice.**
+Current phase: **Post-WS-H follow-up selection completed on 2026-04-25. Next slice: D-2 (`knowledge_store` truth-gate routing).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-H merged to `main` via PR #8 on 2026-04-25. Select next follow-up slice.**
+Current phase: **Post-WS-H follow-up selection completed on 2026-04-25. Next slice: D-2 (`knowledge_store` truth-gate routing).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2303,7 +2303,8 @@ Immediate next tasks:
 3. ~~Claude: ADVANCE/NO-ADVANCE~~ ✓ **ADVANCE** 2026-04-25
 4. ~~Open PR~~ ws-h → main ✓ PR #8 opened
 5. ~~Merge PR #8~~ ✓ merged to `main` on 2026-04-25
-6. **Select next slice** from carried-forward findings or tranche-close spec work
+6. ~~Select next slice~~ ✓ chosen on 2026-04-25
+7. **Open D-2 follow-up slice** — route `knowledge_store` through the deterministic truth gate by adding it to `TOOL_TAXONOMY` as `truth_gated`, verify with focused consequence tests, and document the closure.
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
@@ -2467,3 +2468,45 @@ Open carry-forward findings after merge:
 - postcheck normalization remains unimplemented as `src/steward/tool/postcheck-rules.ts`
 
 Next process step: run a spec gate to choose the next follow-up slice or declare tranche-close criteria.
+
+### Post-WS-H spec gate decision (2026-04-25)
+
+Spec-Q result: choose **D-2** as the next follow-up slice.
+
+Why D-2 goes first:
+- `D-2` is the only open carry-forward that currently leaves a live steward invariant partially unenforced.
+- `truth-gate.ts` already defines deterministic grounding policy for `knowledge_store`:
+  - requires `provenance_urls`
+  - requires `confidence >= 0.6`
+  - returns `REROUTE` when those conditions are missing
+- but `consequence-simulator.ts` only enters the deterministic truth-gate path when `resolveConsequenceClass(...) === "truth_gated"`.
+- current `src/steward/consequence/tool-taxonomy.ts` does **not** include `knowledge_store`, so the fallback class is `"checked"`.
+- result: the host-owned deterministic gate for `knowledge_store` exists in code but is not the actual live path. That violates the intended WS-D invariant that deterministic truth-gated cases are enforced without planner/model discretion.
+
+Why the other carry-forward items do **not** go first:
+- `H-2` is a fidelity/alignment issue inside metacog anomaly semantics, but it does not leave the deterministic truth gate unreachable.
+- `D-1` is a spec-location / ownership-clarity issue around `action-policy-bridge.ts`; the bridge works and was already review-passed as non-blocking.
+- `postcheck-rules.ts` is still a valid follow-up, but the specific spec text saying "before WS-B or WS-D consumes normalized tool artifacts" is now stale because WS-B and WS-D are already merged. It should be reframed before implementation, not taken first by reflex.
+
+Chosen next slice:
+- **Slice D-2** — `knowledge_store` deterministic truth-gate routing
+
+Invariant for D-2:
+- if steward policy says a tool is deterministically truth-gated, the live consequence path must route that tool through `evaluateTruthGate(...)` before any model-based consequence classification.
+
+Target files for D-2:
+- `src/steward/consequence/tool-taxonomy.ts`
+- `src/steward/consequence/consequence-simulator.test.ts`
+- optionally `src/steward/consequence/truth-gate.test.ts` if additional direct coverage is needed
+- `STEWARD2_SPEC.md`
+
+Acceptance for D-2:
+- `knowledge_store` resolves to `truth_gated` in the taxonomy
+- `evaluateConsequencePolicy({ toolName: "knowledge_store", ... })` reaches the deterministic truth gate
+- missing provenance causes `REROUTE`
+- confidence below `0.6` causes `REROUTE`
+- grounded knowledge writes can `ALLOW`
+- focused consequence tests pass
+
+Next command:
+`STEWARD2 IMPLEMENT D-2`
