@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-H ADVANCE 2026-04-25. Commit 730063ea0a. Open PR to main.**
+Current phase: **WS-H merged to `main` via PR #8 on 2026-04-25. Select next follow-up slice.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,15 +2295,17 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-H ADVANCE 2026-04-25. Commit 730063ea0a. Open PR to main.**
+Current phase: **WS-H merged to `main` via PR #8 on 2026-04-25. Select next follow-up slice.**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
 2. ~~Codex: commit all WS-H changes~~ ✓ commit 730063ea0a — H-1 resolved
 3. ~~Claude: ADVANCE/NO-ADVANCE~~ ✓ **ADVANCE** 2026-04-25
-4. **Open PR** ws-h → main
+4. ~~Open PR~~ ws-h → main ✓ PR #8 opened
+5. ~~Merge PR #8~~ ✓ merged to `main` on 2026-04-25
+6. **Select next slice** from carried-forward findings or tranche-close spec work
 
-Carry-forward (not yet approved, does not block reviewer gate):
+Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
 - Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring
 - Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY` so provenance/confidence gate is reachable through the simulator
@@ -2445,3 +2447,23 @@ Open findings carried forward — do not block advancement:
 - D-2: `knowledge_store: "truth_gated"` absent from `TOOL_TAXONOMY`
 
 **Architect (Claude): ADVANCE.** WS-H passes review on commit 730063ea0a. Open PR ws-h → main.
+
+### WS-H post-merge status (2026-04-25)
+
+Merge confirmed: PR #8 merged `ws-h` → `main`. Merge commit `1c7b57f934`.
+
+WS-H is on `main`:
+- `src/steward/control/control-budget.ts`
+- `src/steward/control/metacog-monitor.ts`
+- `src/steward/control/maintenance-governor.ts`
+- `src/steward/control/self-improvement.ts`
+- `src/steward/mission/value-scorer.ts`
+- host seam updates in `src/steward/runtime/session-bridge.ts`, `src/steward/memory/prompt-context.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`, and `src/steward/db/runtime-schema.ts`
+
+Open carry-forward findings after merge:
+- H-2: FRUSTRATION uses task-value score proxy instead of proof verdict; either align to proof verdicts or document as intentional
+- D-1: `action-policy-bridge.ts` spec-location ambiguity
+- D-2: `knowledge_store: "truth_gated"` absent from `TOOL_TAXONOMY`
+- postcheck normalization remains unimplemented as `src/steward/tool/postcheck-rules.ts`
+
+Next process step: run a spec gate to choose the next follow-up slice or declare tranche-close criteria.
