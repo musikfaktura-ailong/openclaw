@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-H implemented and verified on branch `ws-h`. Waiting for reviewer gate.**
+Current phase: **WS-H ADVANCE 2026-04-25. Commit 730063ea0a. Open PR to main.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,15 +2295,19 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **WS-H implemented and verified on branch `ws-h`. Waiting for reviewer gate.**
+Current phase: **WS-H ADVANCE 2026-04-25. Commit 730063ea0a. Open PR to main.**
 
 Immediate next tasks:
-1. **Claude: review WS-H** — read the WS-H handoff below and review module ownership, runtime control seam, budget enforcement, prompt injection, DB persistence, and test evidence. Return PASS/FAIL with structural findings only.
+1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
+2. ~~Codex: commit all WS-H changes~~ ✓ commit 730063ea0a — H-1 resolved
+3. ~~Claude: ADVANCE/NO-ADVANCE~~ ✓ **ADVANCE** 2026-04-25
+4. **Open PR** ws-h → main
 
 Carry-forward (not yet approved, does not block reviewer gate):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
 - Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring
 - Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY` so provenance/confidence gate is reachable through the simulator
+- Finding H-2 follow-up: FRUSTRATION detection uses `mission.task_value.adjudicated` events (score ≤ 3 / label hollow/low_value) rather than proof verdicts — either align to proof verdicts or explicitly document this as an intentional deviation from the PEQS source in `metacog-monitor.ts`
 
 WS-H pre-conditions:
 - E-1 resolved in `src/steward/memory/prompt-context.ts`
@@ -2401,3 +2405,43 @@ Verification evidence:
 - static evidence: full TypeScript check passed with Node heap raised to 8192 MB
 
 Verdict: **PASS.** Workstream H implementation and Codex verification are complete. Next process step is the reviewer gate.
+
+### Reviewer gate output (2026-04-25)
+
+Reviewer (Claude): WS-H reviewed on branch `ws-h`. Code passes all structural checks. One blocking branch finding and one minor deviation documented below.
+
+**Module ownership:** all 4 spec-named modules exist under `src/steward/control/` — `control-budget.ts`, `metacog-monitor.ts`, `maintenance-governor.ts`, `self-improvement.ts` ✓
+
+**Runtime control seam:** `session-bridge.ts` owns the completion sequence: `judgeAndPersistProof()` → `adjudicateTaskValue()` → `runMetacogMonitorTick()` / `runMaintenanceGovernorTick()` / `runSelfImprovementTick()` → `completeRuntimeFlow()` / `markRuntimeIdle()` → `runtime.idle`. All three control ticks gated on `aborted !== true`. Planner cannot bypass. ✓
+
+**Budget enforcement:** constants (3 tasks / 24h, 20% ratio) match spec. DB-backed via `steward_kv` and `steward_flow_tasks`. Blocked seeds emit `control.budget.blocked`. Ratio gate has grace zone for low total-task counts. ✓ Observation: `taskId = flowId` alias in `seedControlTask` is fragile if `steward_flows` and task rows diverge — not blocking.
+
+**Prompt injection:** E-1 resolved — `hierarchyPromptContext()` called in `prompt-context.ts`. E-2 resolved — `value-scorer.ts` exists and injected from `attempt.ts`. Self-improvement hints DB-backed and injected from `prompt-context.ts`. ✓
+
+**DB persistence:** 6 typed control event kinds registered in `runtime-schema.ts`. Budget and hint state in `steward_kv`. Seeded work in `steward_flows` + `steward_flow_tasks`. ✓
+
+**Test evidence:** `4` files, `8` tests — all pass. TypeScript clean. ✓
+
+**Findings:**
+
+- **H-1 (BLOCKING)** — Nothing committed to `ws-h`. All 8 new files (`src/steward/control/*.ts` and `*.test.ts`) are untracked. All 5 modified files (`session-bridge.ts`, `prompt-context.ts`, `attempt.ts`, `runtime-schema.ts`, `value-scorer.ts`) are uncommitted working tree changes. `ws-h` is identical to `main` in git history. Branch cannot be merged or PRed until all changes are staged and committed.
+
+- **H-2 (non-blocking)** — FRUSTRATION detection uses `mission.task_value.adjudicated` events (score ≤ 3 or label hollow/low_value) rather than proof verdicts. Spec says "> 5 consecutive failed tasks." Low-value ≠ failed — a task can score low value without being a proof failure. Acceptable approximation but is an intentional deviation from the PEQS Python source. Document as such if keeping.
+
+**Verdict: PASS on code. BLOCKED on branch state (H-1).** Resolve H-1 (commit all changes to ws-h), then open PR.
+
+### Advancement decision (2026-04-25)
+
+Commit 730063ea0a delivered all 14 files: 4 control modules, 4 test files, 5 modified seam files, STEWARD2_SPEC.md. H-1 resolved.
+
+Re-verified against committed state:
+- Tests: 4 files, 8 tests — pass ✓
+- TypeScript: clean ✓
+- Working tree: only reviewer spec edits uncommitted (no implementation drift) ✓
+
+Open findings carried forward — do not block advancement:
+- H-2: FRUSTRATION uses task-value score proxy instead of proof verdict; document or align before next workstream closes
+- D-1: `action-policy-bridge.ts` spec-location ambiguity
+- D-2: `knowledge_store: "truth_gated"` absent from `TOOL_TAXONOMY`
+
+**Architect (Claude): ADVANCE.** WS-H passes review on commit 730063ea0a. Open PR ws-h → main.
