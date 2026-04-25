@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **Post-WS-H follow-up selection completed on 2026-04-25. Next slice: D-2 (`knowledge_store` truth-gate routing).**
+Current phase: **D-2 implementation in progress on branch `d-2` (2026-04-25).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **Post-WS-H follow-up selection completed on 2026-04-25. Next slice: D-2 (`knowledge_store` truth-gate routing).**
+Current phase: **D-2 implementation in progress on branch `d-2` (2026-04-25).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2304,7 +2304,7 @@ Immediate next tasks:
 4. ~~Open PR~~ ws-h → main ✓ PR #8 opened
 5. ~~Merge PR #8~~ ✓ merged to `main` on 2026-04-25
 6. ~~Select next slice~~ ✓ chosen on 2026-04-25
-7. **Open D-2 follow-up slice** — route `knowledge_store` through the deterministic truth gate by adding it to `TOOL_TAXONOMY` as `truth_gated`, verify with focused consequence tests, and document the closure.
+7. **Codex: implement D-2** — route `knowledge_store` through the deterministic truth gate by adding it to `TOOL_TAXONOMY` as `truth_gated`, verify with focused consequence tests, and document the closure on branch `d-2`.
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
@@ -2510,3 +2510,48 @@ Acceptance for D-2:
 
 Next command:
 `STEWARD2 IMPLEMENT D-2`
+
+### D-2 implementation gate (2026-04-25)
+
+Implementer (Codex): implement follow-up slice D-2 on branch `d-2`.
+
+Invariant:
+- if steward policy says a tool is deterministically truth-gated, the live consequence path must route that tool through `evaluateTruthGate(...)` before any model-based consequence classification.
+
+Scope:
+- add `knowledge_store: "truth_gated"` to `src/steward/consequence/tool-taxonomy.ts`
+- add focused live-path coverage to `src/steward/consequence/consequence-simulator.test.ts`
+- update `STEWARD2_SPEC.md` with implementation and verification evidence
+
+Acceptance:
+- `knowledge_store` resolves to `truth_gated`
+- missing provenance causes live `REROUTE`
+- low confidence causes live `REROUTE`
+- grounded knowledge writes can live `ALLOW`
+- focused consequence tests pass
+
+### D-2 implementation output
+
+Implementer (Codex): modified `src/steward/consequence/tool-taxonomy.ts` so `knowledge_store` now resolves to `truth_gated`. Extended `src/steward/consequence/consequence-simulator.test.ts` with live-path coverage proving the simulator routes `knowledge_store` through the deterministic truth gate.
+
+Implemented invariant:
+- `knowledge_store` no longer falls through to the generic `"checked"` consequence class
+- the live consequence path for `knowledge_store` now enters `evaluateTruthGate(...)` before any model-based consequence classification
+- the deterministic grounding contract for knowledge persistence is now host-owned in the actual route, not only in an unreachable helper branch
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec vitest run src/steward/consequence/truth-gate.test.ts src/steward/consequence/consequence-simulator.test.ts` — pass (`2` files, `6` tests)
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit` — pass
+
+### D-2 verification output
+
+Verifier (Codex): targeted D-2 verification passed on branch `d-2`.
+
+Verification evidence:
+- taxonomy evidence: `knowledge_store` is explicitly classified as `truth_gated`
+- live-path evidence: `evaluateConsequencePolicy({ toolName: "knowledge_store", ... })` now returns `consequenceClass = "truth_gated"`
+- reroute evidence: missing provenance triggers live `REROUTE` with `rerouteToolName = "web_fetch"` and persists `consequence.reroute`
+- allow evidence: grounded `knowledge_store` writes can live `ALLOW` and persist `consequence.check`
+- static evidence: full TypeScript check passed
+
+Verdict: **PASS.** D-2 implementation and Codex verification are complete. Next process step is reviewer gate / advancement decision for the D-2 follow-up slice.

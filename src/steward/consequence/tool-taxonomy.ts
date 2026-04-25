@@ -75,6 +75,7 @@ export const TOOL_TAXONOMY: Readonly<Record<string, ConsequenceClass>> = {
   write:            "truth_gated",  // create or overwrite file
   edit:             "truth_gated",  // make precise edits to file
   apply_patch:      "truth_gated",  // apply patch to file
+  knowledge_store:  "truth_gated",  // persist grounded knowledge only when provenance/confidence are present
 
   // ── checked (external or hard-to-reverse; LLM negation classification) ────
   message:          "checked",      // send external messages (Slack/email/etc.)
