@@ -16,6 +16,19 @@ import { runMetacogMonitorTick } from "../control/metacog-monitor.js";
 import { runMaintenanceGovernorTick } from "../control/maintenance-governor.js";
 import { runSelfImprovementTick } from "../control/self-improvement.js";
 
+function resolveTerminalTaskStatus(params: {
+  aborted: boolean;
+  proofVerdict?: "accepted" | "rejected" | null;
+}): "succeeded" | "failed" {
+  if (params.aborted) {
+    return "failed";
+  }
+  if (params.proofVerdict === "rejected") {
+    return "failed";
+  }
+  return "succeeded";
+}
+
 export async function recordInboundTurnStart(params: {
   storePath: string;
   sessionKey: string;
@@ -62,8 +75,9 @@ export async function recordTurnComplete(params: {
   const authority = getOrCreateStewardSession(params.sessionKey);
   const current = getRuntimeState(authority.sessionId);
   const now = Date.now();
+  const aborted = params.result?.aborted === true;
   const proofResult =
-    params.result?.aborted === true
+    aborted
       ? null
       : await judgeAndPersistProof({
           sessionId: authority.sessionId,
@@ -80,7 +94,7 @@ export async function recordTurnComplete(params: {
           },
         });
   const taskValueResult =
-    params.result?.aborted === true
+    aborted
       ? null
       : await adjudicateTaskValue({
           sessionId: authority.sessionId,
@@ -96,7 +110,7 @@ export async function recordTurnComplete(params: {
           now,
         });
   const controlResult =
-    params.result?.aborted === true
+    aborted
       ? null
       : {
           metacog: runMetacogMonitorTick({
@@ -112,9 +126,14 @@ export async function recordTurnComplete(params: {
             now,
           }),
         };
+  const terminalTaskStatus = resolveTerminalTaskStatus({
+    aborted,
+    proofVerdict: proofResult?.verdict ?? null,
+  });
   completeRuntimeFlow({
     flowId: current?.activeFlowId,
     taskId: current?.activeTaskId,
+    linkStatus: terminalTaskStatus,
   });
   markRuntimeIdle({
     sessionKey: authority.sessionId,
@@ -126,19 +145,20 @@ export async function recordTurnComplete(params: {
     flowId: current?.activeFlowId ?? null,
     data: {
       sessionKey: params.sessionKey,
-      aborted: params.result?.aborted ?? false,
+      aborted,
       proofId: proofResult?.proofId ?? null,
       proofVerdict: proofResult?.verdict ?? null,
       proofScore: proofResult?.score ?? null,
       taskValueScore: taskValueResult?.score ?? null,
       taskValueLabel: taskValueResult?.label ?? null,
+      terminalTaskStatus,
       controlResult,
     },
     now,
   });
   await recordSessionContinuityMemory({
     sessionKey: params.sessionKey,
-    aborted: params.result?.aborted ?? false,
+    aborted,
     now,
   });
   await projectSessionToCompatibilityStore({

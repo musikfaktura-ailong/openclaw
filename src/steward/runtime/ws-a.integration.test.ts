@@ -164,8 +164,8 @@ describe("WS-A steward runtime authority", () => {
         version: number;
       };
       const flow = db
-        .prepare(`SELECT status FROM steward_flows WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
-        .get(authorityId) as { status: string };
+        .prepare(`SELECT status FROM steward_flows WHERE id = ?`)
+        .get(runtimeAfterInbound.active_flow_id) as { status: string };
       const events = db
         .prepare(`SELECT kind FROM steward_events WHERE session_id = ? ORDER BY id`)
         .all(authorityId) as Array<{ kind: string }>;
@@ -182,6 +182,59 @@ describe("WS-A steward runtime authority", () => {
           "runtime.idle",
         ]),
       );
+    });
+  });
+
+  it("persists a failed terminal task status for aborted turns", async () => {
+    await withTempStore(async ({ storePath }) => {
+      const sessionKey = "agent:main:webchat:direct:user-abort";
+      await recordSessionMetaFromInbound({
+        storePath,
+        sessionKey,
+        ctx: createInboundContext(sessionKey),
+      });
+
+      const sessionStore = loadSessionStore(storePath, { skipCache: true });
+      await updateSessionStoreAfterAgentRun({
+        cfg: {} as never,
+        sessionId: sessionStore[sessionKey]!.sessionId,
+        sessionKey,
+        storePath,
+        sessionStore,
+        defaultProvider: "openai",
+        defaultModel: "gpt-test",
+        result: {
+          meta: {
+            durationMs: 1,
+            aborted: true,
+            finalAssistantVisibleText: "",
+          },
+        } as never,
+      });
+
+      const authorityId = computeStewardSessionId("main", "webchat:direct:user-abort");
+      const taskRow = getDb()
+        .prepare(
+          `SELECT t.link_status
+           FROM steward_flow_tasks t
+           JOIN steward_flows f ON f.id = t.flow_id
+           WHERE f.session_id = ?
+           ORDER BY t.id DESC
+           LIMIT 1`,
+        )
+        .get(authorityId) as { link_status: string };
+      const idleEvent = getDb()
+        .prepare(
+          `SELECT data_json
+           FROM steward_events
+           WHERE session_id = ? AND kind = 'runtime.idle'
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get(authorityId) as { data_json: string };
+
+      expect(taskRow.link_status).toBe("failed");
+      expect(idleEvent.data_json).toContain("\"terminalTaskStatus\":\"failed\"");
     });
   });
 });

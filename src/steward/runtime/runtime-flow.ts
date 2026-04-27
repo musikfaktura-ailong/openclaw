@@ -29,6 +29,7 @@ export function createRuntimeFlow(params: {
 export function completeRuntimeFlow(params: {
   flowId: number | null | undefined;
   taskId: number | null | undefined;
+  linkStatus?: "succeeded" | "failed";
   now?: number;
 }): void {
   // port of core/runtime_flow.py flow completion semantics into Steward2 flow rows
@@ -45,8 +46,8 @@ export function completeRuntimeFlow(params: {
   if (params.taskId != null) {
     db.prepare(
       `UPDATE steward_flow_tasks
-       SET link_status = 'succeeded', updated_ts = ?
+       SET link_status = ?, updated_ts = ?
        WHERE flow_id = ? AND task_id = ?`,
-    ).run(now, params.flowId, params.taskId);
+    ).run(params.linkStatus ?? "succeeded", now, params.flowId, params.taskId);
   }
 }

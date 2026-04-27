@@ -94,32 +94,29 @@ export function detectStagnation(params: { sessionId: string; now?: number }): M
 export function detectFrustration(params: { sessionId: string; now?: number }): MetacogAnomaly | null {
   const rows = getDb()
     .prepare(
-      `SELECT data_json
-       FROM steward_events
-       WHERE kind = 'mission.task_value.adjudicated'
-         AND session_id = ?
-       ORDER BY id DESC
+      `SELECT t.link_status
+       FROM steward_flow_tasks t
+       JOIN steward_flows f ON f.id = t.flow_id
+       WHERE f.session_id = ?
+         AND t.role = 'primary'
+       ORDER BY t.id DESC
        LIMIT ?`,
     )
-    .all(params.sessionId, FRUSTRATION_THRESHOLD) as Array<{ data_json: string }>;
+    .all(params.sessionId, FRUSTRATION_THRESHOLD) as Array<{ link_status: string }>;
   if (rows.length < FRUSTRATION_THRESHOLD) {
     return null;
   }
-  const allFailed = rows.every((row) => {
-    try {
-      const data = JSON.parse(row.data_json || "{}") as { score?: number; label?: string };
-      return Number(data.score ?? 10) <= 3 || data.label === "hollow" || data.label === "low_value";
-    } catch {
-      return false;
-    }
-  });
+  const allFailed = rows.every((row) => row.link_status === "failed");
   if (!allFailed) {
     return null;
   }
   return {
     type: "frustration",
     severity: "high",
-    detail: { consecutiveFailures: FRUSTRATION_THRESHOLD },
+    detail: {
+      consecutiveFailures: FRUSTRATION_THRESHOLD,
+      statuses: rows.map((row) => row.link_status),
+    },
     ts: params.now ?? Date.now(),
   };
 }

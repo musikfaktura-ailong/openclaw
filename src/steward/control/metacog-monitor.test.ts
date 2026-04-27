@@ -39,10 +39,27 @@ describe("WS-H metacog monitor", () => {
     expect(row.kind).toBe("control.anomaly.detected");
   });
 
-  it("detects frustration after more than five consecutive low-value outcomes", () => {
+  it("does not treat low-value-but-completed work as frustration", () => {
     const sessionKey = "agent:main:webchat:direct:metacog-frustration";
     const session = getOrCreateStewardSession(sessionKey, 10_000);
     for (let index = 0; index < FRUSTRATION_THRESHOLD; index += 1) {
+      const flowResult = getDb()
+        .prepare(
+          `INSERT INTO steward_flows (
+             session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+           ) VALUES (?, 'control', 'completed', '{}', ?, ?, ?, ?)`,
+        )
+        .run(session.sessionId, process.pid, 10_000 + index, 10_000 + index, 10_000 + index) as {
+        lastInsertRowid: number | bigint;
+      };
+      const flowId = Number(flowResult.lastInsertRowid);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_flow_tasks (
+             flow_id, task_id, role, link_status, created_ts, updated_ts
+           ) VALUES (?, ?, 'primary', 'succeeded', ?, ?)`,
+        )
+        .run(flowId, flowId, 10_000 + index, 10_000 + index);
       appendStewardEvent({
         kind: "mission.task_value.adjudicated",
         message: "task_value.adjudicated",
@@ -53,6 +70,38 @@ describe("WS-H metacog monitor", () => {
           label: "hollow",
         },
       });
+    }
+
+    const result = runMetacogMonitorTick({
+      sessionKey,
+      now: 20_000,
+    });
+
+    expect(result.anomalies).not.toContain("frustration");
+    expect(result.tasksSeeded).toHaveLength(0);
+  });
+
+  it("detects frustration after consecutive terminal task failures", () => {
+    const sessionKey = "agent:main:webchat:direct:metacog-terminal-failure";
+    const session = getOrCreateStewardSession(sessionKey, 10_000);
+    for (let index = 0; index < FRUSTRATION_THRESHOLD; index += 1) {
+      const flowResult = getDb()
+        .prepare(
+          `INSERT INTO steward_flows (
+             session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+           ) VALUES (?, 'control', 'completed', '{}', ?, ?, ?, ?)`,
+        )
+        .run(session.sessionId, process.pid, 10_000 + index, 10_000 + index, 10_000 + index) as {
+        lastInsertRowid: number | bigint;
+      };
+      const flowId = Number(flowResult.lastInsertRowid);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_flow_tasks (
+             flow_id, task_id, role, link_status, created_ts, updated_ts
+           ) VALUES (?, ?, 'primary', 'failed', ?, ?)`,
+        )
+        .run(flowId, flowId, 10_000 + index, 10_000 + index);
     }
 
     const result = runMetacogMonitorTick({
