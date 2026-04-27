@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **D-1 implementation in progress on branch `d-1` (2026-04-27).**
+Current phase: **D-1 reviewer gate complete — PASS. Open PR d-1 → main (2026-04-27).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **D-1 implementation in progress on branch `d-1` (2026-04-27).**
+Current phase: **D-1 reviewer gate complete — PASS. Open PR d-1 → main (2026-04-27).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2308,11 +2308,13 @@ Immediate next tasks:
 8. ~~Open PR~~ d-2 → main ✓ PR #9 opened and merged on 2026-04-27
 9. ~~Codex: implement H-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 10. ~~Open PR~~ h-2 → main ✓ PR #10 opened and merged on 2026-04-27
-11. **Codex: implement D-1** — resolve whether `action-policy-bridge.ts` remains a documented compatibility shim or becomes the seam-owning bridge module, on branch `d-1`.
+11. ~~Codex: implement D-1~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
+12. **Open PR** d-1 → main
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
-- Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring
+- ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
+- Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed (non-blocking)
 - ~~Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY`~~ ✓ closed by D-2 (2026-04-27)
 - ~~Finding H-2 follow-up: FRUSTRATION detection uses `mission.task_value.adjudicated` events (score ≤ 3 / label hollow/low_value) rather than proof verdicts~~ ✓ closed by H-2 (2026-04-27) — FRUSTRATION now reads `steward_flow_tasks.link_status = 'failed'` (host-owned terminal state)
 
@@ -2820,3 +2822,17 @@ Verification evidence:
 - static evidence: full TypeScript check passed
 
 Verdict: **PASS.** D-1 implementation and Codex verification are complete. Next process step is reviewer gate / advancement decision for the D-1 follow-up slice.
+
+### D-1 reviewer gate (2026-04-27)
+
+Reviewer (Claude): reviewed `action-policy-bridge.ts`, `consequence-bridge.ts`, `consequence-simulator.ts`, `consequence-bridge.test.ts` on branch `d-1`.
+
+Invariant satisfied: the spec-named file now owns the consequence→approval bridge seam. File name and spec agree. `consequence-bridge.ts` is an explicitly documented compatibility re-export shim with no implementation remaining.
+
+Evidence confirmed independently:
+- `corepack pnpm exec vitest run src/steward/consequence/consequence-bridge.test.ts src/steward/consequence/consequence-simulator.test.ts` — pass (2 files, 9 tests)
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — pass (clean)
+
+Carry-forward (non-blocking): `consequence-bridge.ts` shim says "temporarily" but has no `@deprecated` JSDoc or removal target. Add before workstream is fully closed.
+
+Verdict: **PASS. ADVANCE** — open PR `d-1 → main`.
