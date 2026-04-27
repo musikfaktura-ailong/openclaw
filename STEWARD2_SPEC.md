@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **D-2 merged to `main` via PR #9 on 2026-04-27. Next slice: H-2 (FRUSTRATION semantics alignment).**
+Current phase: **H-2 implementation in progress on branch `h-2` (2026-04-27).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **D-2 merged to `main` via PR #9 on 2026-04-27. Next slice: H-2 (FRUSTRATION semantics alignment).**
+Current phase: **H-2 implementation in progress on branch `h-2` (2026-04-27).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2306,7 +2306,7 @@ Immediate next tasks:
 6. ~~Select next slice~~ ✓ chosen on 2026-04-25
 7. ~~Codex: implement D-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 8. ~~Open PR~~ d-2 → main ✓ PR #9 opened and merged on 2026-04-27
-9. **Open H-2 follow-up slice** — align FRUSTRATION detection with PEQS terminal-failure semantics, or explicitly document a steward-native replacement invariant if we intentionally diverge.
+9. **Codex: implement H-2** — align FRUSTRATION detection with PEQS terminal-failure semantics, or explicitly document a steward-native replacement invariant if we intentionally diverge, on branch `h-2`.
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
@@ -2638,3 +2638,52 @@ Acceptance for H-2:
 
 Next command:
 `STEWARD2 IMPLEMENT H-2`
+
+### H-2 implementation gate (2026-04-27)
+
+Implementer (Codex): implement follow-up slice H-2 on branch `h-2`.
+
+Invariant:
+- metacog FRUSTRATION must detect consecutive terminal failure states, not merely low-value outcomes, unless Steward2 explicitly adopts a different steward-native invariant and documents that replacement in the spec and code.
+
+Scope:
+- persist a host-owned terminal task status at turn completion
+- update `src/steward/control/metacog-monitor.ts` so FRUSTRATION reads terminal failure state rather than `mission.task_value.adjudicated`
+- add focused tests for:
+  - low-value-but-completed work does not trigger FRUSTRATION
+  - consecutive terminal failures do trigger FRUSTRATION
+  - runtime completion persists terminal failure state
+- update `STEWARD2_SPEC.md` with implementation and verification evidence
+
+Acceptance:
+- FRUSTRATION is driven by terminal failure semantics, not task-value labels alone
+- the runtime has a host-owned persisted signal for consecutive terminal failures
+- metacog test coverage proves low-value-but-completed work does not trigger FRUSTRATION by itself
+- metacog test coverage proves terminal failure sequences do trigger FRUSTRATION
+
+### H-2 implementation output
+
+Implementer (Codex): modified `src/steward/runtime/runtime-flow.ts` and `src/steward/runtime/session-bridge.ts` so turn completion now persists a terminal task outcome on the runtime task row: `failed` when the turn aborts or the proof verdict is `rejected`, otherwise `succeeded`. Modified `src/steward/control/metacog-monitor.ts` so FRUSTRATION reads the last primary `steward_flow_tasks.link_status` values for the session instead of low-value task-value events. Extended `src/steward/control/metacog-monitor.test.ts` and `src/steward/runtime/ws-a.integration.test.ts` with focused H-2 coverage.
+
+Implemented invariant:
+- FRUSTRATION no longer piggybacks on mission scoring
+- the host seam now persists a terminal failure signal at runtime completion
+- metacog reads that persisted terminal state directly from steward runtime tables
+- low-value-but-completed work no longer counts as terminal failure by itself
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec vitest run src/steward/control/metacog-monitor.test.ts src/steward/runtime/ws-a.integration.test.ts` — pass (`2` files, `8` tests)
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit` — pass
+
+### H-2 verification output
+
+Verifier (Codex): targeted H-2 verification passed on branch `h-2`.
+
+Verification evidence:
+- runtime persistence evidence: aborted turns now persist `terminalTaskStatus = "failed"` and the corresponding runtime task row is stored with `link_status = 'failed'`
+- anomaly evidence: FRUSTRATION reads the last primary task terminal statuses instead of task-value labels
+- negative evidence: low-value-but-completed work does not trigger FRUSTRATION
+- positive evidence: consecutive terminal failures do trigger FRUSTRATION and seed a control analysis task
+- static evidence: full TypeScript check passed
+
+Verdict: **PASS.** H-2 implementation and Codex verification are complete. Next process step is reviewer gate / advancement decision for the H-2 follow-up slice.
