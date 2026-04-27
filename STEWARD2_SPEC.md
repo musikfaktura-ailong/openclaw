@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **D-2 complete; reviewer gate PASS; ADVANCE issued (2026-04-27). Next: open PR d-2 → main.**
+Current phase: **D-2 merged to `main` via PR #9 on 2026-04-27. Next slice: H-2 (FRUSTRATION semantics alignment).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **D-2 complete; reviewer gate PASS; ADVANCE issued (2026-04-27). Next: open PR d-2 → main.**
+Current phase: **D-2 merged to `main` via PR #9 on 2026-04-27. Next slice: H-2 (FRUSTRATION semantics alignment).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2305,7 +2305,8 @@ Immediate next tasks:
 5. ~~Merge PR #8~~ ✓ merged to `main` on 2026-04-25
 6. ~~Select next slice~~ ✓ chosen on 2026-04-25
 7. ~~Codex: implement D-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
-8. **Open PR** d-2 → main.
+8. ~~Open PR~~ d-2 → main ✓ PR #9 opened and merged on 2026-04-27
+9. **Open H-2 follow-up slice** — align FRUSTRATION detection with PEQS terminal-failure semantics, or explicitly document a steward-native replacement invariant if we intentionally diverge.
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
@@ -2586,3 +2587,54 @@ Structural findings (non-blocking):
 **Verdict: PASS.**
 
 **Architect (Claude): ADVANCE.** D-2 passes review. Open PR d-2 → main.
+
+### D-2 post-merge status (2026-04-27)
+
+Merge confirmed: PR #9 merged `d-2` → `main`. Merge commit `52b57630f3`.
+
+D-2 is on `main`:
+- `knowledge_store` is `truth_gated` in `src/steward/consequence/tool-taxonomy.ts`
+- live-path coverage exists in `src/steward/consequence/consequence-simulator.test.ts`
+
+Open carry-forward findings after D-2 merge:
+- H-2: FRUSTRATION uses task-value score proxy instead of terminal task/proof failure semantics
+- D-1: `action-policy-bridge.ts` spec-location ambiguity
+- postcheck normalization remains unimplemented and its old dependency rationale is stale
+
+Next process step: run a spec gate to choose the next follow-up slice.
+
+### Post-D-2 spec gate decision (2026-04-27)
+
+Spec-Q result: choose **H-2** as the next follow-up slice.
+
+Why H-2 goes first:
+- `H-2` is now the only remaining carry-forward that changes live steward runtime behavior rather than documentation clarity or stale planning text.
+- PEQS source behavior in `C:\ai_agent\PEQS\core\metacog_monitor.py` defines FRUSTRATION as `> 5 terminal failures in a row`, implemented by checking the last task statuses for `failed`, `stopped`, or `deleted`.
+- current Steward2 behavior in `src/steward/control/metacog-monitor.ts` instead checks the last `mission.task_value.adjudicated` events and treats low-value / hollow outcomes as frustration.
+- that is not just an implementation detail; it changes the anomaly invariant. Low-value is a mission-scoring judgment, not a terminal failure state.
+- as long as that mismatch remains, metacog can seed self-analysis tasks for low-value-but-completed work, which is a different runtime behavior from the PEQS donor.
+
+Why the other carry-forward items do **not** go first:
+- `D-1` is still an ownership/spec-location issue. The bridge behavior works; the remaining problem is whether the shim file should stay a re-export or own the bridge seam explicitly.
+- `postcheck-rules.ts` still needs a spec rewrite before implementation because its old phrase "before WS-B or WS-D consumes normalized tool artifacts" no longer matches repo state after both workstreams merged.
+
+Chosen next slice:
+- **Slice H-2** — FRUSTRATION semantics alignment
+
+Invariant for H-2:
+- metacog FRUSTRATION must detect consecutive terminal failure states, not merely low-value outcomes, unless Steward2 explicitly adopts a different steward-native invariant and documents that replacement in the spec and code.
+
+Target files for H-2:
+- `src/steward/control/metacog-monitor.ts`
+- `src/steward/control/metacog-monitor.test.ts`
+- potentially `src/steward/runtime/session-bridge.ts` or runtime persistence tables only if a task-terminal signal must be persisted to support the invariant
+- `STEWARD2_SPEC.md`
+
+Acceptance for H-2:
+- FRUSTRATION is driven by terminal failure semantics, not task-value labels alone
+- the runtime has a host-owned persisted signal for consecutive terminal failures
+- metacog test coverage proves low-value-but-completed work does not trigger FRUSTRATION by itself
+- metacog test coverage proves terminal failure sequences do trigger FRUSTRATION
+
+Next command:
+`STEWARD2 IMPLEMENT H-2`
