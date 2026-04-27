@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **D-1 reviewer gate complete — PASS. Open PR d-1 → main (2026-04-27).**
+Current phase: **D-1 merged. Final follow-up slice is postcheck normalization spec gate complete; next step is implementation (2026-04-27).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -1170,7 +1170,7 @@ Steward2 target modules:
 Port shape:
 - precheck rules ported from `tool_supervisor.py` and re-expressed with OpenClaw tool IDs (`web_search`, `web_fetch`, `exec`, `read`/`write`/`edit`, `apply_patch`) — do not use PEQS-internal IDs
 - TypeScript type is an idiomatic adaptation: `verdict` replaces `classification`, `rerouteToolName` makes rerouting explicit, Python-only fields (`report_type`, `ok`, `sanitized_args`) dropped as redundant in a typed language
-- `postcheck()` (result normalization) is not in WS-F scope; deferred to before WS-B or WS-D consumes normalized tool artifacts
+- `postcheck()` (result normalization) is not in WS-F scope; deferred as a separate host-owned follow-up slice on the post-tool result seam
 - unknown tool IDs pass precheck with `accept`; no PEQS-to-OpenClaw ID mapping needed
 
 Responsibilities:
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **D-1 reviewer gate complete — PASS. Open PR d-1 → main (2026-04-27).**
+Current phase: **D-1 merged. Final follow-up slice is postcheck normalization spec gate complete; next step is implementation (2026-04-27).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2309,10 +2309,13 @@ Immediate next tasks:
 9. ~~Codex: implement H-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 10. ~~Open PR~~ h-2 → main ✓ PR #10 opened and merged on 2026-04-27
 11. ~~Codex: implement D-1~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
-12. **Open PR** d-1 → main
+12. ~~Open PR~~ d-1 → main ✓ PR #11 opened and merged on 2026-04-27
+13. ~~Reconcile D-1 post-merge state~~ ✓ done 2026-04-27
+14. **Open final follow-up slice** postcheck normalization ✓ done 2026-04-27
+15. **Codex: implement postcheck normalization slice**
 
-Carry-forward (open, non-blocking after WS-H merge):
-- `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
+Carry-forward (open):
+- `postcheck()` result normalization: implement the host-owned post-tool normalization seam as `src/steward/tool/postcheck-rules.ts` plus the supervising wrapper in `src/steward/tool/tool-supervisor.ts`; this is now the final open follow-up slice
 - ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
 - Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed (non-blocking)
 - ~~Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY`~~ ✓ closed by D-2 (2026-04-27)
@@ -2836,3 +2839,79 @@ Evidence confirmed independently:
 Carry-forward (non-blocking): `consequence-bridge.ts` shim says "temporarily" but has no `@deprecated` JSDoc or removal target. Add before workstream is fully closed.
 
 Verdict: **PASS. ADVANCE** — open PR `d-1 → main`.
+
+### D-1 post-merge status (2026-04-27)
+
+D-1 is on `main`:
+- branch `d-1`
+- PR `#11`
+- merge commit `6931e51bd960ba43e1c9c7f8cfea827907c74313`
+
+Closed by D-1 merge:
+- `action-policy-bridge.ts` ownership/spec-location ambiguity
+
+Open carry-forward after D-1 merge:
+- final open implementation slice: `postcheck()` result normalization on the live tool-result seam
+- non-blocking cleanup: add `@deprecated` JSDoc and removal target to `consequence-bridge.ts`
+
+Next process step: run a spec gate to reconcile D-1 as merged and define the final postcheck slice against the actual code path.
+
+### Post-D-1 spec gate decision (2026-04-27)
+
+Spec-Q result: choose **Postcheck normalization** as the final follow-up slice.
+
+Why this is now the next slice:
+- `D-1`, `D-2`, and `H-2` are merged and closed.
+- `postcheck()` is now the only remaining implementation follow-up that changes host-owned runtime behavior.
+- the old phrase "before WS-B or WS-D consumes normalized tool artifacts" is obsolete because both workstreams are already merged.
+- the real remaining gap is not a dependency ordering issue; it is a missing host seam after tool execution.
+
+Invariant for the final postcheck slice:
+- every tool result that leaves the execution layer must pass through a host-owned postcheck seam that:
+  - classifies failed tool outcomes deterministically as `retry`, `reroute`, `refuse`, or `hard_fail`
+  - normalizes successful tool outputs into typed artifacts before downstream steward logic consumes them
+  - persists diagnostically relevant blocked/rerouted/error evidence in the steward event ledger
+- this normalization must not depend on planner prose, ad hoc per-tool parsing in downstream modules, or hidden session state.
+
+Architectural benchmark and donor:
+- PEQS donor: `C:\ai_agent\PEQS\core\tool_supervisor.py`
+- proven donor behavior:
+  - `precheck(tool, args)` validates inputs before execution
+  - `postcheck(tool, args, result)` deterministically classifies failed tool results and emits normalized artifacts for successful results
+- OpenClaw seam to own in Steward2:
+  - tool execution enters through the existing steward tool supervisor / before-tool-call path
+  - result normalization must be added as the host-owned post-tool seam, not pushed into truth/proof/consequence consumers
+
+Current code-path violation:
+- `src/steward/tool/precheck-rules.ts` and `src/steward/tool/tool-supervisor.ts` currently cover only pre-execution validation.
+- there is no steward-owned `postcheck-rules.ts`.
+- downstream modules therefore cannot rely on one canonical normalized artifact contract for tool outcomes.
+
+Chosen final slice:
+- **Slice P-1** — postcheck normalization seam
+
+Ownership stance:
+- `copy/adapt`: PEQS deterministic postcheck classification and artifact-shaping rules
+- `bridge`: OpenClaw tool execution result surface into steward DB/event evidence
+- `replace`: any downstream ad hoc interpretation of raw tool result payloads as a substitute for a canonical postcheck contract
+
+Target files for P-1:
+- `src/steward/tool/postcheck-rules.ts`
+- `src/steward/tool/tool-supervisor.ts`
+- one explicit OpenClaw seam adapter where tool results become available after execution
+- focused tests under `src/steward/tool/` and one live seam/integration test proving post-tool classification/normalization
+
+Dependencies for P-1:
+- none blocking; all prerequisite workstreams are already merged
+- use PEQS `tool_supervisor.postcheck()` as donor reference before implementation
+- keep scope on the host-owned result seam only; do not reopen D/H slices while implementing P-1
+
+Acceptance for P-1:
+- failed tool results are classified deterministically through one steward-owned postcheck path
+- successful tool results for the current steward-supported tool set produce typed normalized artifacts
+- diagnostically relevant postcheck failures/reroutes are persisted in the steward event ledger
+- focused tests prove both positive normalization and negative classification behavior
+- one runtime seam test proves the postcheck path executes after tool completion and before downstream steward consumers rely on tool-result structure
+
+Next command:
+`STEWARD2 IMPLEMENT P-1`
