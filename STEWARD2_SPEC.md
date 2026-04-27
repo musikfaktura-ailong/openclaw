@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **D-1 merged. Final follow-up slice is postcheck normalization spec gate complete; next step is implementation (2026-04-27).**
+Current phase: **P-1 implemented and verified on branch `p-1`; next step is reviewer gate (2026-04-27).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **D-1 merged. Final follow-up slice is postcheck normalization spec gate complete; next step is implementation (2026-04-27).**
+Current phase: **P-1 implemented and verified on branch `p-1`; next step is reviewer gate (2026-04-27).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2312,7 +2312,8 @@ Immediate next tasks:
 12. ~~Open PR~~ d-1 → main ✓ PR #11 opened and merged on 2026-04-27
 13. ~~Reconcile D-1 post-merge state~~ ✓ done 2026-04-27
 14. **Open final follow-up slice** postcheck normalization ✓ done 2026-04-27
-15. **Codex: implement postcheck normalization slice**
+15. ~~Codex: implement postcheck normalization slice~~ ✓ done 2026-04-27 — focused tests PASS; full TypeScript PASS
+16. **Claude: review P-1**
 
 Carry-forward (open):
 - `postcheck()` result normalization: implement the host-owned post-tool normalization seam as `src/steward/tool/postcheck-rules.ts` plus the supervising wrapper in `src/steward/tool/tool-supervisor.ts`; this is now the final open follow-up slice
@@ -2915,3 +2916,46 @@ Acceptance for P-1:
 
 Next command:
 `STEWARD2 IMPLEMENT P-1`
+
+### P-1 implementation gate (2026-04-27)
+
+Implementer (Codex): implement follow-up slice P-1 on branch `p-1`.
+
+Invariant:
+- every tool result that leaves the execution layer must pass through one steward-owned postcheck seam that deterministically classifies failures, normalizes supported successful tool payloads into typed artifacts, and persists diagnosable evidence in the steward ledger.
+
+### P-1 implementation output
+
+Implementer (Codex): added `src/steward/tool/postcheck-rules.ts` as the steward-owned donor port for deterministic post-tool classification and artifact normalization. Extended `src/steward/tool/tool-supervisor.ts` with `postcheckToolResult()`, steward-event persistence, and canonical `details.stewardPostcheck` attachment on returned tool results. Added `tool.postcheck.normalized` and `tool.postcheck.classified` to `src/steward/db/runtime-schema.ts`.
+
+Seam wiring:
+- `src/agents/pi-tools.before-tool-call.ts` now runs postcheck immediately after tool execution and before loop outcome recording or downstream result use; thrown tool failures are classified through the same seam with a synthetic error result payload.
+- `src/gateway/tools-invoke-http.ts` now runs the same postcheck seam for direct HTTP tool invocation before returning the tool result.
+- `src/agents/pi-tool-definition-adapter.ts` now applies postcheck for unwrapped tool definitions so non-wrapped tool execution still leaves through the steward-owned normalization seam exactly once.
+
+Supported normalized artifacts in P-1:
+- `web_search` -> `search_result_set`
+- `web_fetch` -> `fetched_document`
+- `exec` -> `execution_report`
+- `knowledge_store` -> `store_report`
+
+Tests added/extended:
+- `src/steward/tool/tool-supervisor.test.ts`
+- `src/agents/pi-tools.before-tool-call.steward-precheck.test.ts`
+
+### P-1 verification output
+
+Verifier (Codex): targeted P-1 verification passed on branch `p-1`.
+
+Evidence:
+- focused postcheck/supervisor suites passed:
+  - `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts src/agents/pi-tools.before-tool-call.steward-precheck.test.ts`
+  - result: `2` files, `9` tests, PASS
+- full static check passed:
+  - `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+- live seam evidence:
+  - wrapped `web_search` execution now returns `details.stewardPostcheck.artifacts.search_result_set`
+  - same execution persists `tool.postcheck.normalized` with `toolCallId` and normalized artifact evidence in `steward_events`
+  - deterministic error payloads persist `tool.postcheck.classified` with retry/refuse/reroute/hard-fail verdict evidence
+
+Verdict: **PASS.** P-1 implementation and Codex verification are complete. Next process step is reviewer gate.

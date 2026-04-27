@@ -6,6 +6,7 @@ import type {
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { logDebug, logError } from "../logger.js";
 import { redactToolDetail } from "../logging/redact.js";
+import { postcheckToolResult } from "../steward/tool/tool-supervisor.js";
 import { isPlainObject } from "../utils.js";
 import { sanitizeForConsole } from "./console-sanitize.js";
 import type { ClientToolDefinition } from "./pi-embedded-runner/run/params.js";
@@ -239,10 +240,18 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
             executeParams = hookOutcome.params;
           }
           const rawResult = await tool.execute(toolCallId, executeParams, signal, onUpdate);
-          const result = normalizeToolExecutionResult({
+          const normalizedResult = normalizeToolExecutionResult({
             toolName: normalizedName,
             result: rawResult,
           });
+          const result = beforeHookWrapped
+            ? normalizedResult
+            : postcheckToolResult({
+                toolName: normalizedName,
+                args: executeParams,
+                result: normalizedResult,
+                toolCallId,
+              }).result;
           return result;
         } catch (err) {
           if (signal?.aborted) {
@@ -265,10 +274,18 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
           });
           logError(`[tools] ${normalizedName} failed: ${described.message} ${inputPreview}`);
 
-          return buildToolExecutionErrorResult({
+          const errorResult = buildToolExecutionErrorResult({
             toolName: normalizedName,
             message: described.message,
           });
+          return beforeHookWrapped
+            ? errorResult
+            : postcheckToolResult({
+                toolName: normalizedName,
+                args: executeParams,
+                result: errorResult,
+                toolCallId,
+              }).result;
         }
       },
     } satisfies ToolDefinition;
