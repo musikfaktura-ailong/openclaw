@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **H-2 reviewer gate complete — PASS. Open PR h-2 → main (2026-04-27).**
+Current phase: **H-2 merged to `main` via PR #10 on 2026-04-27. Next slice: D-1 (`action-policy-bridge.ts` ownership clarity).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **H-2 reviewer gate complete — PASS. Open PR h-2 → main (2026-04-27).**
+Current phase: **H-2 merged to `main` via PR #10 on 2026-04-27. Next slice: D-1 (`action-policy-bridge.ts` ownership clarity).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2307,7 +2307,8 @@ Immediate next tasks:
 7. ~~Codex: implement D-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 8. ~~Open PR~~ d-2 → main ✓ PR #9 opened and merged on 2026-04-27
 9. ~~Codex: implement H-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
-10. **Open PR** h-2 → main.
+10. ~~Open PR~~ h-2 → main ✓ PR #10 opened and merged on 2026-04-27
+11. **Open D-1 follow-up slice** — resolve whether `action-policy-bridge.ts` remains a documented compatibility shim or becomes the seam-owning bridge module.
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
@@ -2719,3 +2720,59 @@ Structural findings (non-blocking):
 **Verdict: PASS.**
 
 **Architect (Claude): ADVANCE.** H-2 passes review. Open PR h-2 → main.
+
+### H-2 post-merge status (2026-04-27)
+
+Merge confirmed: PR #10 merged `h-2` → `main`. Merge commit `076e8c8733`.
+
+H-2 is on `main`:
+- runtime completion persists terminal task status in `src/steward/runtime/runtime-flow.ts` and `src/steward/runtime/session-bridge.ts`
+- FRUSTRATION now reads terminal failure state in `src/steward/control/metacog-monitor.ts`
+- focused runtime/metacog coverage exists in `src/steward/control/metacog-monitor.test.ts` and `src/steward/runtime/ws-a.integration.test.ts`
+
+Open carry-forward findings after H-2 merge:
+- D-1: `action-policy-bridge.ts` spec-location ambiguity
+- postcheck normalization remains unimplemented and its old dependency rationale is stale
+
+Next process step: run a spec gate to choose the next follow-up slice.
+
+### Post-H-2 spec gate decision (2026-04-27)
+
+Spec-Q result: choose **D-1** as the next follow-up slice.
+
+Why D-1 goes first:
+- `D-1` is now the only remaining concrete follow-up that is immediately implementation-ready.
+- the current file `src/steward/consequence/action-policy-bridge.ts` is only a re-export shim:
+  - it exports from `consequence-bridge.ts`
+  - but the spec still names `action-policy-bridge.ts` as the bridge module that maps steward consequence recommendations to OpenClaw approval behavior
+- this is not a runtime break, but it is an ownership ambiguity: the spec says one file owns the seam while the code puts the seam logic in another file.
+- that mismatch is small, local, and ready to close either by:
+  - documenting `action-policy-bridge.ts` as an intentional compatibility shim, or
+  - moving/owning the bridge logic there directly.
+
+Why `postcheck` does **not** go first:
+- `postcheck-rules.ts` is not yet a clean implementation slice because the old spec rationale is stale:
+  - "before WS-B or WS-D consumes normalized tool artifacts" no longer matches repo reality after both workstreams merged
+- before implementation, that slice needs its invariant and dependency framing rewritten around the current codebase.
+- so `postcheck` is a later spec+implementation slice, not the next ready one.
+
+Chosen next slice:
+- **Slice D-1** — `action-policy-bridge.ts` ownership clarification
+
+Invariant for D-1:
+- the file named in the spec as the consequence→approval bridge must either actually own that seam or be explicitly documented as a compatibility shim with the true owner named.
+
+Target files for D-1:
+- `src/steward/consequence/action-policy-bridge.ts`
+- `src/steward/consequence/consequence-bridge.ts`
+- `STEWARD2_SPEC.md`
+- optionally the related consequence tests if the seam location changes
+
+Acceptance for D-1:
+- the spec and code agree on which file owns the consequence→approval bridge seam
+- there is no ambiguity between shim vs owner
+- if the shim stays, the spec explicitly says so
+- if ownership moves, focused consequence tests still pass
+
+Next command:
+`STEWARD2 IMPLEMENT D-1`
