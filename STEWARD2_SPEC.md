@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **H-2 merged to `main` via PR #10 on 2026-04-27. Next slice: D-1 (`action-policy-bridge.ts` ownership clarity).**
+Current phase: **D-1 implementation in progress on branch `d-1` (2026-04-27).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **H-2 merged to `main` via PR #10 on 2026-04-27. Next slice: D-1 (`action-policy-bridge.ts` ownership clarity).**
+Current phase: **D-1 implementation in progress on branch `d-1` (2026-04-27).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2308,7 +2308,7 @@ Immediate next tasks:
 8. ~~Open PR~~ d-2 → main ✓ PR #9 opened and merged on 2026-04-27
 9. ~~Codex: implement H-2~~ ✓ done 2026-04-27 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 10. ~~Open PR~~ h-2 → main ✓ PR #10 opened and merged on 2026-04-27
-11. **Open D-1 follow-up slice** — resolve whether `action-policy-bridge.ts` remains a documented compatibility shim or becomes the seam-owning bridge module.
+11. **Codex: implement D-1** — resolve whether `action-policy-bridge.ts` remains a documented compatibility shim or becomes the seam-owning bridge module, on branch `d-1`.
 
 Carry-forward (open, non-blocking after WS-H merge):
 - `postcheck()` result normalization: must be implemented as `src/steward/tool/postcheck-rules.ts` before WS-B (truth audit) or WS-D (consequence logic) consumes normalized tool output artifacts
@@ -2776,3 +2776,47 @@ Acceptance for D-1:
 
 Next command:
 `STEWARD2 IMPLEMENT D-1`
+
+### D-1 implementation gate (2026-04-27)
+
+Implementer (Codex): implement follow-up slice D-1 on branch `d-1`.
+
+Invariant:
+- the file named in the spec as the consequence→approval bridge must either actually own that seam or be explicitly documented as a compatibility shim with the true owner named.
+
+Scope:
+- make `src/steward/consequence/action-policy-bridge.ts` the seam-owning bridge module
+- keep `src/steward/consequence/consequence-bridge.ts` only as an explicit compatibility shim
+- switch live imports/tests to the seam-owning file
+- update `STEWARD2_SPEC.md` with implementation and verification evidence
+
+Acceptance:
+- the spec and code agree that `action-policy-bridge.ts` owns the bridge seam
+- `consequence-bridge.ts` is clearly a compatibility shim, not an ambiguous second owner
+- focused consequence bridge tests still pass
+
+### D-1 implementation output
+
+Implementer (Codex): moved the bridge mapping implementation into `src/steward/consequence/action-policy-bridge.ts`, converted `src/steward/consequence/consequence-bridge.ts` into an explicit compatibility re-export shim, and switched live imports/tests to the seam-owning file.
+
+Implemented invariant:
+- the spec-named file now actually owns the consequence→approval bridge seam
+- `consequence-bridge.ts` is no longer a silent second owner; it is explicitly documented as compatibility-only
+- the live consequence simulator now binds to the spec-named bridge file
+
+Local implementation verification completed during implementation:
+- `corepack pnpm exec vitest run src/steward/consequence/consequence-bridge.test.ts src/steward/consequence/consequence-simulator.test.ts` — pass (`2` files, `9` tests)
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit` — pass
+
+### D-1 verification output
+
+Verifier (Codex): targeted D-1 verification passed on branch `d-1`.
+
+Verification evidence:
+- ownership evidence: `action-policy-bridge.ts` now contains the bridge mapping implementation
+- compatibility evidence: `consequence-bridge.ts` is explicitly documented as a compatibility shim and only re-exports from `action-policy-bridge.ts`
+- live-path evidence: `consequence-simulator.ts` now imports the bridge seam from `action-policy-bridge.ts`
+- test evidence: focused consequence bridge suite passed (`2` files, `9` tests)
+- static evidence: full TypeScript check passed
+
+Verdict: **PASS.** D-1 implementation and Codex verification are complete. Next process step is reviewer gate / advancement decision for the D-1 follow-up slice.

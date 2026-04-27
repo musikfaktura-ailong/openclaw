@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveBridgeDecision } from "./consequence-bridge.js";
+import { resolveBridgeDecision } from "./action-policy-bridge.js";
 
 describe("WS-D consequence bridge", () => {
   it("maps ALLOW without blocking", () => {

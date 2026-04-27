@@ -9,7 +9,7 @@ import {
   resolveBridgeDecision,
   type ConsequenceBridgeDecision,
   type ConsequenceRecommendation,
-} from "./consequence-bridge.js";
+} from "./action-policy-bridge.js";
 import { persistOperatorOverride } from "./operator-override.js";
 import { resolveConsequenceClass } from "./tool-taxonomy.js";
 import { evaluateTruthGate } from "./truth-gate.js";
