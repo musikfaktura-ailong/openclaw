@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **P-1 merged via PR #12. Post-merge reconciliation complete; next step is select the next follow-up slice (2026-04-28).**
+Current phase: **Post-P-1 spec gate complete. Next step is implement the final cleanup slice (2026-04-28).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **P-1 merged via PR #12. Post-merge reconciliation complete; next step is select the next follow-up slice (2026-04-28).**
+Current phase: **Post-P-1 spec gate complete. Next step is implement the final cleanup slice (2026-04-28).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2319,7 +2319,7 @@ Immediate next tasks:
 Carry-forward (open):
 - ~~`postcheck()` result normalization~~ ✓ closed by P-1 (2026-04-28)
 - P-1 carry-forward: remove hardcoded Danish locale string from `postcheck-rules.ts` line 75 (non-blocking)
-- P-1 carry-forward: wire `sessionKey` into gateway path (`tools-invoke-http.ts`) so postcheck events are persisted for gateway-invoked tools — must be done before WS-B (truth audit)
+- ~~P-1 carry-forward: wire `sessionKey` into gateway path (`tools-invoke-http.ts`) so postcheck events are persisted for gateway-invoked tools~~ ✓ already satisfied on `main` by P-1 merge state reconciliation (2026-04-28) — gateway path now passes `sessionKey` into `postcheckToolResult`
 - ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
 - Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed (non-blocking)
 - ~~Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY`~~ ✓ closed by D-2 (2026-04-27)
@@ -2991,7 +2991,39 @@ Closed by P-1 merge:
 
 Open carry-forward after P-1 merge:
 - remove the redundant hardcoded Danish locale string from `src/steward/tool/postcheck-rules.ts`
-- wire `sessionKey` into the gateway path in `src/gateway/tools-invoke-http.ts` so gateway-invoked postchecks persist steward events before WS-B consumes gateway-path postcheck evidence
+- ~~wire `sessionKey` into the gateway path in `src/gateway/tools-invoke-http.ts` so gateway-invoked postchecks persist steward events before WS-B consumes gateway-path postcheck evidence~~ ✓ already satisfied on `main` by merged P-1 code
 - add `@deprecated` JSDoc and removal target to `src/steward/consequence/consequence-bridge.ts`
 
 Next process step: run a spec gate to choose the next follow-up slice after P-1 merge.
+
+### Post-P-1 spec gate decision (2026-04-28)
+
+Spec-Q result: choose **D-1b** as the next follow-up slice.
+
+Why D-1b goes first:
+- the gateway `sessionKey` carry-forward is stale and already resolved in merged `main`; it is not a real remaining slice.
+- `D-1b` closes the last explicit ownership-cleanup requirement on the consequence bridge seam.
+- unlike the redundant locale-string cleanup, `D-1b` completes a previously reviewer-noted compatibility-shim contract and removes ambiguity about lifecycle/retirement of the shim file.
+
+Why the locale-string cleanup does **not** go first:
+- it is a narrow classifier hygiene fix with no ownership or lifecycle consequence.
+- it remains valid, but it does not block understanding of any seam or module boundary.
+
+Chosen next slice:
+- **Slice D-1b** — compatibility shim deprecation marker
+
+Invariant for D-1b:
+- any compatibility shim retained after ownership has moved must explicitly declare its deprecated status and removal target in code, so there is no silent second long-term owner.
+
+Target files for D-1b:
+- `src/steward/consequence/consequence-bridge.ts`
+- `STEWARD2_SPEC.md`
+
+Acceptance for D-1b:
+- `consequence-bridge.ts` has explicit `@deprecated` JSDoc
+- the removal target is named in the file comment/JSDoc
+- the file remains a compatibility re-export only
+- no runtime behavior changes
+
+Next command:
+`STEWARD2 IMPLEMENT D-1b`
