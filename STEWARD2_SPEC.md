@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **D-1b merged via PR #13. Post-merge reconciliation complete; next step is tranche-close spec gate (2026-04-28).**
+Current phase: **Tranche-close spec gate complete. Final polish slice remains; next step is implement locale cleanup (2026-04-28).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **D-1b merged via PR #13. Post-merge reconciliation complete; next step is tranche-close spec gate (2026-04-28).**
+Current phase: **Tranche-close spec gate complete. Final polish slice remains; next step is implement locale cleanup (2026-04-28).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -3069,3 +3069,30 @@ Open carry-forward after D-1b merge:
 - remove the redundant hardcoded Danish locale string from `src/steward/tool/postcheck-rules.ts`
 
 Next process step: run a tranche-close spec gate to decide whether that remaining cleanup slice must be implemented before deployment testing, or can stay as a non-blocking polish item.
+
+### Tranche-close spec gate decision (2026-04-28)
+
+Decision: implement the remaining locale-string cleanup **before** deployment testing.
+
+Reason:
+- operator preference is to close loose ends now rather than carry even small known defects into deployment evaluation
+- the remaining item is tiny, isolated, and already understood
+- closing it now gives a clean tranche-close state with no known open code cleanups in the current migration file
+
+Chosen final slice:
+- **Slice P-1b** — remove redundant locale-specific postcheck classifier string
+
+Invariant for P-1b:
+- deterministic tool-failure classification must rely on locale-independent signals where those already exist; redundant locale-specific string matching must not remain as a hidden platform-specific branch
+
+Target files for P-1b:
+- `src/steward/tool/postcheck-rules.ts`
+- `STEWARD2_SPEC.md`
+
+Acceptance for P-1b:
+- the hardcoded Danish socket-permission string is removed
+- `winerror 10013` / locale-independent checks remain intact
+- no runtime behavior changes beyond removing redundant locale-specific matching
+
+Next command:
+`STEWARD2 IMPLEMENT P-1b`
