@@ -7,7 +7,7 @@ import { PluginApprovalResolutions, type PluginApprovalResolution } from "../plu
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
 import { evaluateConsequencePolicy } from "../steward/consequence/consequence-simulator.js";
 import { isPlainObject } from "../utils.js";
-import { precheckToolCall } from "../steward/tool/tool-supervisor.js";
+import { postcheckToolResult, precheckToolCall } from "../steward/tool/tool-supervisor.js";
 import { copyChannelAgentToolMeta } from "./channel-tools.js";
 import { normalizeToolName } from "./tool-policy.js";
 import type { AnyAgentTool } from "./tools/common.js";
@@ -524,7 +524,14 @@ export function wrapToolWithBeforeToolCallHook(
       }
       const normalizedToolName = normalizeToolName(toolName || "tool");
       try {
-        const result = await execute(toolCallId, outcome.params, signal, onUpdate);
+        const rawResult = await execute(toolCallId, outcome.params, signal, onUpdate);
+        const { result } = postcheckToolResult({
+          toolName: normalizedToolName,
+          args: outcome.params,
+          result: rawResult,
+          sessionKey: ctx?.sessionKey,
+          toolCallId,
+        });
         await recordLoopOutcome({
           ctx,
           toolName: normalizedToolName,
@@ -534,6 +541,20 @@ export function wrapToolWithBeforeToolCallHook(
         });
         return result;
       } catch (err) {
+        postcheckToolResult({
+          toolName: normalizedToolName,
+          args: outcome.params,
+          result: {
+            content: [],
+            details: {
+              status: "error",
+              tool: normalizedToolName,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          },
+          sessionKey: ctx?.sessionKey,
+          toolCallId,
+        });
         await recordLoopOutcome({
           ctx,
           toolName: normalizedToolName,

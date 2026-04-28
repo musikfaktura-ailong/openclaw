@@ -37,6 +37,8 @@ export type StewardEventKind =
   | "control.self_improvement.applied"
   | "control.self_improvement.analyzed"
   | "tool.precheck.blocked"
+  | "tool.postcheck.normalized"
+  | "tool.postcheck.classified"
   | "consequence.check"
   | "consequence.warning"
   | "consequence.reroute"

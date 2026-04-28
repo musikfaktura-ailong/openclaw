@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { runBeforeToolCallHook } from "../agents/pi-tools.before-tool-call.js";
+import { postcheckToolResult } from "../steward/tool/tool-supervisor.js";
 import { resolveToolLoopDetectionConfig } from "../agents/pi-tools.js";
 import { isKnownCoreToolId } from "../agents/tool-catalog.js";
 import { applyOwnerOnlyToolPolicy } from "../agents/tool-policy.js";
@@ -287,7 +288,14 @@ export async function handleToolsInvokeHttpRequest(
       });
       return true;
     }
-    const result = await gatewayTool.execute?.(toolCallId, hookResult.params);
+    const rawResult = await gatewayTool.execute?.(toolCallId, hookResult.params);
+    const { result } = postcheckToolResult({
+      toolName,
+      args: hookResult.params,
+      result: rawResult,
+      sessionKey,
+      toolCallId,
+    });
     sendJson(res, 200, { ok: true, result });
   } catch (err) {
     const inputStatus = resolveToolInputErrorStatus(err);
