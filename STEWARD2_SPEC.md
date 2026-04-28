@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **P-1 reviewer gate complete — PASS. Open PR p-1 → main (2026-04-28).**
+Current phase: **P-1 merged via PR #12. Post-merge reconciliation complete; next step is select the next follow-up slice (2026-04-28).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **P-1 reviewer gate complete — PASS. Open PR p-1 → main (2026-04-28).**
+Current phase: **P-1 merged via PR #12. Post-merge reconciliation complete; next step is select the next follow-up slice (2026-04-28).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2314,7 +2314,7 @@ Immediate next tasks:
 14. **Open final follow-up slice** postcheck normalization ✓ done 2026-04-27
 15. ~~Codex: implement postcheck normalization slice~~ ✓ done 2026-04-27 — focused tests PASS; full TypeScript PASS
 16. ~~Claude: review P-1~~ ✓ done 2026-04-28 — PASS; reviewer gate: PASS; ADVANCE issued.
-17. **Open PR** p-1 → main
+17. ~~Open PR~~ p-1 → main ✓ PR #12 opened and merged on 2026-04-28
 
 Carry-forward (open):
 - ~~`postcheck()` result normalization~~ ✓ closed by P-1 (2026-04-28)
@@ -2978,3 +2978,20 @@ Carry-forwards (non-blocking):
 - `tools-invoke-http.ts` passes no `sessionKey` to `postcheckToolResult` — gateway-path postchecks normalize artifacts but never persist steward events. Must be wired before WS-B (truth audit) consumes postcheck events from the gateway path.
 
 Verdict: **PASS. ADVANCE** — open PR `p-1 → main`.
+
+### P-1 post-merge status (2026-04-28)
+
+P-1 is on `main`:
+- branch `p-1`
+- PR `#12`
+- merge commit `e6cc770519ee980a2059afe2832869af9c673154`
+
+Closed by P-1 merge:
+- final open implementation slice: `postcheck()` result normalization on the live tool-result seam
+
+Open carry-forward after P-1 merge:
+- remove the redundant hardcoded Danish locale string from `src/steward/tool/postcheck-rules.ts`
+- wire `sessionKey` into the gateway path in `src/gateway/tools-invoke-http.ts` so gateway-invoked postchecks persist steward events before WS-B consumes gateway-path postcheck evidence
+- add `@deprecated` JSDoc and removal target to `src/steward/consequence/consequence-bridge.ts`
+
+Next process step: run a spec gate to choose the next follow-up slice after P-1 merge.
