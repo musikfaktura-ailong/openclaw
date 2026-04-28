@@ -3096,3 +3096,29 @@ Acceptance for P-1b:
 
 Next command:
 `STEWARD2 IMPLEMENT P-1b`
+
+### P-1b implementation gate (2026-04-28)
+
+Implementer (Codex): implement final follow-up slice P-1b on branch `p-1b`.
+
+Invariant:
+- deterministic tool-failure classification must rely on locale-independent signals where those already exist; redundant locale-specific string matching must not remain as a hidden platform-specific branch.
+
+### P-1b implementation output
+
+Implementer (Codex): removed the redundant hardcoded Danish socket-permission string from `src/steward/tool/postcheck-rules.ts`. Locale-independent checks (`winerror 10013`, `socket access permissions`) remain intact. No other postcheck logic changed.
+
+### P-1b verification output
+
+Verifier (Codex): targeted P-1b verification passed on branch `p-1b`.
+
+Evidence:
+- focused postcheck suite passed:
+  - `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts`
+  - result: `1` file, `6` tests, PASS
+- full static check passed:
+  - `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+- runtime evidence:
+  - none required; P-1b is a classifier hygiene cleanup with no intended behavior change beyond removing redundant locale-specific matching
+
+Verdict: **PASS.** P-1b implementation and Codex verification are complete. Next process step is reviewer gate.
