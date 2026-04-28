@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **P-1 implemented and verified on branch `p-1`; next step is reviewer gate (2026-04-27).**
+Current phase: **P-1 reviewer gate complete — PASS. Open PR p-1 → main (2026-04-28).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **P-1 implemented and verified on branch `p-1`; next step is reviewer gate (2026-04-27).**
+Current phase: **P-1 reviewer gate complete — PASS. Open PR p-1 → main (2026-04-28).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2313,10 +2313,13 @@ Immediate next tasks:
 13. ~~Reconcile D-1 post-merge state~~ ✓ done 2026-04-27
 14. **Open final follow-up slice** postcheck normalization ✓ done 2026-04-27
 15. ~~Codex: implement postcheck normalization slice~~ ✓ done 2026-04-27 — focused tests PASS; full TypeScript PASS
-16. **Claude: review P-1**
+16. ~~Claude: review P-1~~ ✓ done 2026-04-28 — PASS; reviewer gate: PASS; ADVANCE issued.
+17. **Open PR** p-1 → main
 
 Carry-forward (open):
-- `postcheck()` result normalization: implement the host-owned post-tool normalization seam as `src/steward/tool/postcheck-rules.ts` plus the supervising wrapper in `src/steward/tool/tool-supervisor.ts`; this is now the final open follow-up slice
+- ~~`postcheck()` result normalization~~ ✓ closed by P-1 (2026-04-28)
+- P-1 carry-forward: remove hardcoded Danish locale string from `postcheck-rules.ts` line 75 (non-blocking)
+- P-1 carry-forward: wire `sessionKey` into gateway path (`tools-invoke-http.ts`) so postcheck events are persisted for gateway-invoked tools — must be done before WS-B (truth audit)
 - ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
 - Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed (non-blocking)
 - ~~Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY`~~ ✓ closed by D-2 (2026-04-27)
@@ -2959,3 +2962,19 @@ Evidence:
   - deterministic error payloads persist `tool.postcheck.classified` with retry/refuse/reroute/hard-fail verdict evidence
 
 Verdict: **PASS.** P-1 implementation and Codex verification are complete. Next process step is reviewer gate.
+
+### P-1 reviewer gate (2026-04-28)
+
+Reviewer (Claude): reviewed `postcheck-rules.ts`, `tool-supervisor.ts`, `pi-tools.before-tool-call.ts`, `tools-invoke-http.ts`, `pi-tool-definition-adapter.ts`, `tool-supervisor.test.ts`, `pi-tools.before-tool-call.steward-precheck.test.ts` on branch `p-1`.
+
+Invariant satisfied: every tool result leaving the execution layer passes through `postcheckToolResult`. Failures classified deterministically. 4 supported tool payloads produce typed normalized artifacts. Events persisted in steward ledger for non-accept verdicts and normalized artifacts.
+
+Evidence confirmed independently:
+- `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts src/agents/pi-tools.before-tool-call.steward-precheck.test.ts` — pass (2 files, 9 tests)
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — pass (clean)
+
+Carry-forwards (non-blocking):
+- `postcheck-rules.ts` line 75: hardcoded Danish locale OS error string (`"forbudt af den pågældende..."`) — `winerror 10013` check above already catches this case language-independently; the Danish string is redundant and will silently not match on any other locale. Remove before next release.
+- `tools-invoke-http.ts` passes no `sessionKey` to `postcheckToolResult` — gateway-path postchecks normalize artifacts but never persist steward events. Must be wired before WS-B (truth audit) consumes postcheck events from the gateway path.
+
+Verdict: **PASS. ADVANCE** — open PR `p-1 → main`.
