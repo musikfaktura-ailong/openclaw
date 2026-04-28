@@ -3027,3 +3027,29 @@ Acceptance for D-1b:
 
 Next command:
 `STEWARD2 IMPLEMENT D-1b`
+
+### D-1b implementation gate (2026-04-28)
+
+Implementer (Codex): implement follow-up slice D-1b on branch `d-1b`.
+
+Invariant:
+- any compatibility shim retained after ownership has moved must explicitly declare its deprecated status and removal target in code, so there is no silent second long-term owner.
+
+### D-1b implementation output
+
+Implementer (Codex): updated `src/steward/consequence/consequence-bridge.ts` to add explicit `@deprecated` JSDoc, identify `action-policy-bridge.ts` as the seam-owning file, and name tranche-close after the remaining post-P-1 follow-up slices as the removal target. The file remains a compatibility re-export only; no runtime behavior changed.
+
+### D-1b verification output
+
+Verifier (Codex): targeted D-1b verification passed on branch `d-1b`.
+
+Evidence:
+- focused compatibility shim suite passed:
+  - `corepack pnpm exec vitest run src/steward/consequence/consequence-bridge.test.ts`
+  - result: `1` file, `5` tests, PASS
+- full static check passed:
+  - `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+- runtime evidence:
+  - none required; D-1b is a documentation/ownership cleanup slice with no behavior change
+
+Verdict: **PASS.** D-1b implementation and Codex verification are complete. Next process step is reviewer gate.
