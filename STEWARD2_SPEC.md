@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **Post-P-1 spec gate complete. Next step is implement the final cleanup slice (2026-04-28).**
+Current phase: **D-1b reviewer gate complete — PASS. Open PR d-1b → main (2026-04-28).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **Post-P-1 spec gate complete. Next step is implement the final cleanup slice (2026-04-28).**
+Current phase: **D-1b reviewer gate complete — PASS. Open PR d-1b → main (2026-04-28).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2315,13 +2315,15 @@ Immediate next tasks:
 15. ~~Codex: implement postcheck normalization slice~~ ✓ done 2026-04-27 — focused tests PASS; full TypeScript PASS
 16. ~~Claude: review P-1~~ ✓ done 2026-04-28 — PASS; reviewer gate: PASS; ADVANCE issued.
 17. ~~Open PR~~ p-1 → main ✓ PR #12 opened and merged on 2026-04-28
+18. ~~Codex: implement D-1b~~ ✓ done 2026-04-28 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
+19. **Open PR** d-1b → main
 
 Carry-forward (open):
 - ~~`postcheck()` result normalization~~ ✓ closed by P-1 (2026-04-28)
 - P-1 carry-forward: remove hardcoded Danish locale string from `postcheck-rules.ts` line 75 (non-blocking)
 - ~~P-1 carry-forward: wire `sessionKey` into gateway path (`tools-invoke-http.ts`) so postcheck events are persisted for gateway-invoked tools~~ ✓ already satisfied on `main` by P-1 merge state reconciliation (2026-04-28) — gateway path now passes `sessionKey` into `postcheckToolResult`
 - ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
-- Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed (non-blocking)
+- ~~Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed~~ ✓ closed by D-1b (2026-04-28)
 - ~~Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY`~~ ✓ closed by D-2 (2026-04-27)
 - ~~Finding H-2 follow-up: FRUSTRATION detection uses `mission.task_value.adjudicated` events (score ≤ 3 / label hollow/low_value) rather than proof verdicts~~ ✓ closed by H-2 (2026-04-27) — FRUSTRATION now reads `steward_flow_tasks.link_status = 'failed'` (host-owned terminal state)
 
@@ -3053,3 +3055,17 @@ Evidence:
   - none required; D-1b is a documentation/ownership cleanup slice with no behavior change
 
 Verdict: **PASS.** D-1b implementation and Codex verification are complete. Next process step is reviewer gate.
+
+### D-1b reviewer gate (2026-04-28)
+
+Reviewer (Claude): reviewed `consequence-bridge.ts` on branch `d-1b`.
+
+Invariant satisfied: `@deprecated` JSDoc added, names `action-policy-bridge.ts` as seam owner, names tranche-close as removal target. File remains a pure re-export. No runtime behavior changed.
+
+Evidence confirmed:
+- `corepack pnpm exec vitest run src/steward/consequence/consequence-bridge.test.ts` — pass (1 file, 5 tests)
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — pass (clean)
+
+No carry-forwards. Closes the D-1 reviewer carry-forward.
+
+Verdict: **PASS. ADVANCE** — open PR `d-1b → main`.
