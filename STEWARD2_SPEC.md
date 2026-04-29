@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **P-1b merged via PR #14. Tranche-close reconciliation complete; ready for deployment testing (2026-04-29).**
+Current phase: **LM-A implementation complete on `lm-a`; ready for reviewer gate (2026-04-29).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,6 +56,7 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
+- deployment testing is paused until LM Studio lifecycle ownership is mapped and accepted in this spec
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -3157,3 +3158,427 @@ Tranche-close result:
 
 Next process step:
 - deployment / live evaluation testing for useful steward runtime behavior and LLM thinking quality
+
+## SPEC-Q — LM Studio lifecycle mapping before deployment testing (2026-04-29)
+
+### Why this spec-q exists
+
+Deployment probing exposed a structural gap:
+- Steward2 can currently ask OpenClaw's bundled LM Studio provider to `load/preload` a model before inference
+- Steward2 does **not** currently own the stronger steward invariant from PEQS: one local non-embedding model at a time, explicit unload-before-switch, explicit context-length enforcement, and explicit runtime evidence for load/query lock ownership
+
+This must be mapped before deployment testing continues.
+
+### Intended invariant
+
+For local LM Studio-backed steward runtime, model lifecycle must be host-owned and externally verifiable:
+- exactly one non-embedding local inference model may be active at a time
+- switching local models must be `unload current -> load target -> verify loaded context -> query`
+- concurrent steward turns must not create competing LM Studio load/query races
+- model lifecycle evidence must be persisted as steward runtime events, not only hidden in provider logs
+- remote/API models remain stateless and bypass LM Studio lifecycle ownership entirely
+
+### Donor comparison
+
+#### Donor 1 — OLD_AI TASK_13
+
+Source files:
+- `C:\ai_agent\OLD_AI\core\lm_studio_manager.py`
+- `C:\ai_agent\OLD_AI\core\model_router.py`
+- `C:\ai_agent\OLD_AI\config.json`
+
+What OLD_AI solved:
+- normalized LM Studio API root from configured `/v1` base URL
+- `GET /api/v1/models` to inspect currently loaded instances
+- `POST /api/v1/models/load` to load requested model
+- `POST /api/v1/models/unload` to unload current instance
+- one-thread lifecycle serialization via in-process `_lock`
+- optional `auto_unload_on_switch`
+- graceful degradation if lifecycle API failed
+- explicit lifecycle events:
+  - `lm_studio.model_loaded`
+  - `lm_studio.model_unloaded`
+  - `lm_studio.load_failed`
+
+What OLD_AI did **not** solve strongly enough:
+- no cross-process lock
+- no explicit query lock
+- no context-length correction logic
+- no verification that a loaded model had enough context after load
+
+#### Donor 2 — PEQS steward-native runtime
+
+Source files:
+- `C:\ai_agent\PEQS\core\model_manager.py`
+- `C:\ai_agent\PEQS\core\interprocess_lock.py`
+- `C:\ai_agent\PEQS\PEQS_PROJECT_BRIEF.md`
+
+PEQS invariant, stronger than OLD_AI:
+- non-negotiable rule: unload before load; never two local models simultaneously
+- in-process load lock: `_LM_STUDIO_LOCK`
+- in-process query lock: `_LM_STUDIO_QUERY_LOCK`
+- cross-process load lock: `lmstudio_load.lock`
+- cross-process query lock: `lmstudio_query.lock`
+- explicit loaded-context inspection from `GET /api/v1/models`
+- if target model is already loaded with insufficient context:
+  - unload it
+  - reload with minimum required context
+- if another model is loaded:
+  - unload it first
+- local inference call path is bound to lifecycle ownership:
+  - `load(target)` first
+  - then query through loaded instance id
+- explicit DB/runtime evidence:
+  - `model.process_load_lock_wait_started`
+  - `model.process_load_lock_acquired`
+  - `model.load_started`
+  - `model.load_finished`
+  - `model.load_failed`
+  - `model.process_load_lock_released`
+  - query-lock events around inference
+
+This is the real steward-native donor, not just the earlier OLD_AI helper.
+
+#### Current Steward2 / OpenClaw state
+
+Relevant files:
+- `extensions/lmstudio/src/models.fetch.ts`
+- `extensions/lmstudio/src/stream.ts`
+- `extensions/lmstudio/src/embedding-provider.ts`
+- `src/agents/pi-embedded-runner/run/attempt.ts`
+
+What Steward2 currently has:
+- bundled LM Studio provider plugin
+- LM Studio setup/discovery path
+- best-effort preflight discovery before load
+- `POST /api/v1/models/load` through `ensureLmstudioModelLoaded()`
+- inference preload wrapper before streaming
+- preload de-duplication for identical in-flight requests
+- preload backoff/cooldown after repeated failures
+- embedding warmup preload
+
+What Steward2 currently does **not** have:
+- no steward-owned unload path
+- no steward-owned one-model-at-a-time invariant
+- no steward-owned cross-session or cross-process LM Studio lock ownership
+- no steward-owned query serialization
+- no steward-owned context-length correction policy across role/model switches
+- no steward event-ledger evidence for LM Studio lifecycle actions
+- no runtime distinction between:
+  - assistant-shell provider preload convenience
+  - steward-core model lifecycle authority
+
+### Structural diagnosis
+
+OpenClaw's LM Studio provider is a good assistant-shell convenience layer, but it is not the PEQS steward invariant.
+
+OpenClaw plugin semantics today:
+- "before inference, try to ensure the requested model is loaded"
+- "if preload fails, continue anyway and let inference try"
+
+PEQS steward semantics:
+- "the host owns which local model may exist in RAM"
+- "the host serializes load and query"
+- "the host proves what was loaded, unloaded, and queried"
+- "model switching is a runtime state transition, not a provider convenience"
+
+So the gap is not a missing helper call. It is an ownership mismatch.
+
+### Steward2 target ownership
+
+OpenClaw should continue to own:
+- provider registration
+- model discovery/setup UX
+- raw LM Studio transport helper calls
+- stream wrapper mechanics for provider transport
+
+Steward must newly own:
+- local model role policy
+- single-active-model invariant
+- unload-before-switch transition
+- context-length target policy per steward role
+- load/query lock policy
+- lifecycle event persistence into steward DB ledger
+- deployment/runtime observability for model transitions
+
+### Target seam map
+
+#### Seam 1 — steward lifecycle authority
+
+New steward module group:
+- `src/steward/lmstudio/lifecycle-policy.ts`
+- `src/steward/lmstudio/lifecycle-types.ts`
+- `src/steward/lmstudio/lifecycle-events.ts`
+
+Responsibility:
+- declare whether a runtime model selection is:
+  - `remote_stateless`
+  - `local_lmstudio_inference`
+  - `local_lmstudio_embedding`
+- declare whether switch requires unload
+- declare required context target for steward role
+- compute lifecycle action plan:
+  - `noop`
+  - `load_only`
+  - `unload_then_load`
+  - `reject_conflict`
+
+#### Seam 2 — steward LM Studio runtime bridge
+
+New steward bridge:
+- `src/steward/lmstudio/lifecycle-bridge.ts`
+
+Responsibility:
+- adapter between steward lifecycle authority and OpenClaw LM Studio helper/runtime
+- asks provider helper what is currently loaded
+- calls explicit unload when policy requires it
+- calls explicit load with steward-owned context target
+- returns verified loaded instance identity to the runner
+
+This must be a steward-owned bridge, not more logic hidden inside `extensions/lmstudio/src/stream.ts`.
+
+#### Seam 3 — explicit LM Studio transport helper extension
+
+OpenClaw-side additions, but only as provider-facing helpers:
+- extend `extensions/lmstudio/src/models.fetch.ts`
+
+Needed capabilities:
+- `getLoadedLmstudioModels(...)`
+- `unloadLmstudioModelInstance(...)`
+- `ensureLmstudioModelLoaded(...)` may remain, but becomes a lower-level helper rather than the whole invariant
+
+Rule:
+- provider helper may expose LM Studio primitives
+- steward bridge owns policy and ordering
+
+#### Seam 4 — embedded runner integration
+
+Integration point:
+- `src/agents/pi-embedded-runner/run/attempt.ts`
+
+Required change later:
+- before local LM Studio inference stream is constructed, ask steward lifecycle bridge to reconcile runtime model state
+- the result must be a verified, steward-approved local model transition, not just provider preload
+
+#### Seam 5 — steward runtime evidence
+
+DB/runtime surfaces:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/runtime/session-bridge.ts` only if turn-level lifecycle evidence must be linked to turn completion
+
+Required persisted event kinds:
+- `lmstudio.lifecycle.lock_wait_started`
+- `lmstudio.lifecycle.lock_acquired`
+- `lmstudio.lifecycle.unload_started`
+- `lmstudio.lifecycle.unload_finished`
+- `lmstudio.lifecycle.load_started`
+- `lmstudio.lifecycle.load_finished`
+- `lmstudio.lifecycle.load_failed`
+- `lmstudio.lifecycle.query_lock_wait_started`
+- `lmstudio.lifecycle.query_lock_acquired`
+- `lmstudio.lifecycle.query_lock_released`
+- `lmstudio.lifecycle.context_mismatch_detected`
+
+### Role policy map to port
+
+PEQS had explicit local model roles:
+- primary local model
+- critic local model
+- other local reasoning roles when configured
+
+Steward2 must map this policy explicitly, even if initial deployment uses one LM Studio model:
+- `primary_local`
+- `critic_local`
+- `embedding_local`
+
+Why:
+- if deployment later adds a second local model, the invariant must already exist structurally
+- embedding loads must not silently violate the one-non-embedding-model invariant
+
+### Important design decision
+
+We should **not** copy PEQS `model_manager.py` as a monolith.
+
+Port type by responsibility:
+- `copy/adapt`:
+  - lifecycle invariant
+  - load/query lock semantics
+  - loaded-context verification
+  - unload-before-switch rule
+  - lifecycle event ledger
+- `bridge`:
+  - LM Studio REST primitive calls through OpenClaw plugin/runtime layer
+- `replace`:
+  - PEQS monolithic per-call LLM client path
+  - PEQS controller-bound model selection
+
+### Implementation slices to open after approval
+
+#### LM-A — steward LM Studio lifecycle authority
+
+Invariant:
+- steward computes lifecycle action plan before local LM Studio inference
+
+Donors:
+- `OLD_AI/core/lm_studio_manager.py`
+- `PEQS/core/model_manager.py`
+
+Target modules:
+- `src/steward/lmstudio/lifecycle-types.ts`
+- `src/steward/lmstudio/lifecycle-policy.ts`
+
+Acceptance:
+- deterministic tests prove:
+  - same local model + sufficient context => `noop`
+  - same local model + insufficient context => `unload_then_load`
+  - different local non-embedding model loaded => `unload_then_load`
+  - remote model => `remote_stateless`
+
+#### LM-B — provider helper completion
+
+Invariant:
+- OpenClaw provider layer exposes explicit LM Studio lifecycle primitives, but does not own steward policy
+
+Donors:
+- `OLD_AI/core/lm_studio_manager.py`
+- `PEQS/core/model_manager.py`
+
+Target modules:
+- `extensions/lmstudio/src/models.fetch.ts`
+- possibly `src/plugin-sdk/lmstudio-runtime.ts` if helper exposure is needed there
+
+Acceptance:
+- helper tests prove:
+  - loaded-model discovery
+  - unload by instance id
+  - load with explicit context target
+
+#### LM-C — steward lifecycle bridge + event ledger
+
+Invariant:
+- every local-model transition is steward-owned and persisted
+
+Donors:
+- `PEQS/core/model_manager.py`
+- `PEQS/core/interprocess_lock.py`
+
+Target modules:
+- `src/steward/lmstudio/lifecycle-bridge.ts`
+- `src/steward/lmstudio/lifecycle-events.ts`
+- `src/steward/db/runtime-schema.ts`
+
+Acceptance:
+- bridge tests prove:
+  - unload-before-switch order
+  - context mismatch triggers reload
+  - lock acquisition/release always emits ledger events
+  - remote models bypass lifecycle bridge
+
+#### LM-D — embedded runner seam integration
+
+Invariant:
+- local LM Studio inference path cannot bypass steward lifecycle authority
+
+Donors:
+- `PEQS/core/model_manager.py`
+- current OpenClaw seam in `src/agents/pi-embedded-runner/run/attempt.ts`
+
+Target modules:
+- `src/agents/pi-embedded-runner/run/attempt.ts`
+- steward bridge modules from LM-C
+
+Acceptance:
+- integration evidence proves:
+  - local LM Studio run triggers steward lifecycle events before inference
+  - remote/API model run does not
+  - repeated turns on same loaded model do not churn unload/load unnecessarily
+
+### What is explicitly out of scope for the first lifecycle port
+
+Not part of LM-A through LM-D:
+- changing OpenClaw onboarding UX
+- changing bundled LM Studio provider auth semantics
+- adding a new unload button to UI
+- redesigning provider catalogs
+- changing remote provider behavior
+
+### Deployment-testing decision
+
+Deployment testing is **not** blocked on coding today because no coding starts yet.
+
+But live deployment evaluation that claims steward runtime is structurally complete **is** paused until:
+- this LM Studio lifecycle map is approved
+- implementation slices LM-A through LM-D are sequenced
+- reviewer confirms the invariant is being ported, not just another preload patch
+
+### Next process step
+
+- reviewer gate on LM-A
+- CF-LM-1 and CF-LM-2 remain open for LM-C scope definition; they do not block LM-A review
+
+### LM-A implementation (2026-04-29)
+
+Implementer: Codex
+
+Files added:
+- `src/steward/lmstudio/lifecycle-types.ts`
+- `src/steward/lmstudio/lifecycle-policy.ts`
+- `src/steward/lmstudio/lifecycle-policy.test.ts`
+
+What LM-A now does:
+- defines steward-owned LM Studio lifecycle vocabulary:
+  - role: `primary_local`, `critic_local`, `embedding_local`
+  - target kind: `remote_stateless`, `local_lmstudio_inference`, `local_lmstudio_embedding`
+  - action: `noop`, `load_only`, `unload_then_load`, `reject_conflict`
+- deterministically classifies runtime model selections into steward lifecycle classes
+- computes required context target by lifecycle role
+- deterministically chooses lifecycle action based on:
+  - target provider
+  - target model id
+  - loaded model set
+  - loaded context length
+  - embedding vs inference class
+
+What LM-A does **not** do yet:
+- no provider helper changes
+- no unload/load HTTP calls
+- no runner seam wiring
+- no lock implementation
+- no event-ledger persistence
+
+Focused acceptance evidence:
+- same local model + sufficient context => `noop`
+- same local model + insufficient context => `unload_then_load`
+- different local inference model loaded => `unload_then_load`
+- no relevant loaded model => `load_only`
+- remote/API model => `remote_stateless`
+- embedding lifecycle classified separately from inference lifecycle
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/lmstudio/lifecycle-policy.test.ts`
+  - PASS: `1` file, `7` tests
+  - note: required escalation because sandbox Vitest startup hit `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forwards still open before LM-C:
+- **CF-LM-1: Query lock scope**
+- **CF-LM-2: Cross-process lock scope**
+
+### LM MAP reviewer gate (2026-04-29)
+
+Reviewer: Claude Code
+
+Evidence reviewed:
+- `PEQS/core/model_manager.py` — full read; all four locks, all lifecycle events, context-length verification, unload-before-switch, and remote-bypass path confirmed accurate in spec
+- `PEQS/core/interprocess_lock.py` — full read; file-based lock (msvcrt/fcntl), PID metadata, timeout+poll confirmed
+- `Steward2/extensions/lmstudio/src/stream.ts` — confirmed: best-effort preload only, no unload, no lock
+- `Steward2/extensions/lmstudio/src/models.fetch.ts` — confirmed: `ensureLmstudioModelLoaded` only, no unload, no getLoaded, no context check
+- `Steward2/src/agents/pi-embedded-runner/run/attempt.ts` — confirmed: zero LM Studio references; lifecycle entirely inside provider plugin, not steward-owned
+
+Verdict: **PASS. ADVANCE** — open `STEWARD2 IMPLEMENT LM-A`.
+
+Carry-forwards (non-blocking on LM-A and LM-B, must be resolved before LM-C opens):
+
+- **CF-LM-1: Query lock scope** — spec lists query lock events (`query_lock_wait_started/acquired/released`) but does not assign query lock ownership to a slice. LM-C acceptance criteria must either include the query lock or explicitly defer it to a future LM-E slice. In PEQS the query lock wraps inference, not load — distinguish this before LM-C starts.
+- **CF-LM-2: Cross-process lock scope** — PEQS used file-based cross-process locks because Python could spawn multiple processes. Steward2 is a single Node.js event loop. Before LM-C, record a decision: in-process async serialization sufficient, or cross-process file lock needed? If a separate preload worker ever runs alongside the main process, file locking is needed; otherwise in-process is simpler and sufficient.
