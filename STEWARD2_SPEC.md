@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-A implementation complete on `lm-a`; ready for reviewer gate (2026-04-29).**
+Current phase: **WS-IA implementation complete on `ws-ia`; ready for reviewer gate (2026-04-29). LM-A PASS — open PR lm-a → main, then LM-B.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,7 +56,7 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing is paused until LM Studio lifecycle ownership is mapped and accepted in this spec
+- deployment testing is paused until LM Studio lifecycle ownership and the autonomous steward control-loop map are accepted in this spec
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -2296,7 +2296,8 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **P-1b merged via PR #14. Tranche-close reconciliation complete; ready for deployment testing (2026-04-29).**
+Current phase at that time: **P-1b merged via PR #14. Tranche-close reconciliation complete; ready for deployment testing (2026-04-29).**  
+Superseded by the 2026-04-29 autonomy-control mapping decision below.
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -3565,6 +3566,22 @@ Carry-forwards still open before LM-C:
 - **CF-LM-1: Query lock scope**
 - **CF-LM-2: Cross-process lock scope**
 
+### LM-A reviewer gate (2026-04-29)
+
+Reviewer: Claude Code
+
+Evidence reviewed:
+- `src/steward/lmstudio/lifecycle-types.ts` — all spec-required types present; `reject_conflict` declared but not yet produced (correct for LM-A scope; production path is LM-C)
+- `src/steward/lmstudio/lifecycle-policy.ts` — all 5 action paths verified: remote noop, noop on matching model+sufficient context, `unload_then_load` on context mismatch, `unload_then_load` on different model, `load_only` on empty; embedding/inference separation via `filterRelevantLoaded` confirmed correct — embedding invisible to inference planning and vice versa
+- `src/steward/lmstudio/lifecycle-policy.test.ts` — 7 tests covering all 4 spec acceptance criteria plus 3 additional edge cases (remote with loaded model, embedding coexistence, embedding reload)
+- tests: `corepack pnpm exec vitest run src/steward/lmstudio/lifecycle-policy.test.ts` — 1 file, 7 tests, PASS
+- TypeScript: `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — clean
+
+New carry-forward from LM-A for LM-B:
+- **CF-LM-3: Key normalization contract** — `modelMatches` uses exact equality after stripping `lmstudio/` prefix. PEQS used fuzzy prefix/substring matching to handle LM Studio returning longer instance IDs than registered model keys. LM-B must ensure `getLoadedLmstudioModels()` returns keys in a form that matches what callers pass as `modelId`, or normalize at the bridge layer before calling `planLmstudioLifecycle`.
+
+Verdict: **PASS. ADVANCE** — open PR `lm-a → main`.
+
 ### LM MAP reviewer gate (2026-04-29)
 
 Reviewer: Claude Code
@@ -3582,3 +3599,838 @@ Carry-forwards (non-blocking on LM-A and LM-B, must be resolved before LM-C open
 
 - **CF-LM-1: Query lock scope** — spec lists query lock events (`query_lock_wait_started/acquired/released`) but does not assign query lock ownership to a slice. LM-C acceptance criteria must either include the query lock or explicitly defer it to a future LM-E slice. In PEQS the query lock wraps inference, not load — distinguish this before LM-C starts.
 - **CF-LM-2: Cross-process lock scope** — PEQS used file-based cross-process locks because Python could spawn multiple processes. Steward2 is a single Node.js event loop. Before LM-C, record a decision: in-process async serialization sufficient, or cross-process file lock needed? If a separate preload worker ever runs alongside the main process, file locking is needed; otherwise in-process is simpler and sufficient.
+## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
+
+Deployment testing must not continue under the assumption that Steward2 is already a real steward just because the truth/proof/consequence/mission modules exist.
+
+The original steward systems were not passive request/response shells. Both donor systems were autonomous daemon-style operators:
+- `PEQS` steward booted, checked capabilities, seeded first-contact and continuity work, created goals, and kept system ticks alive even when no operator prompt arrived.
+- `OLD_AI` booted a bootstrap lane, planning lane, exec lane, idle seeding path, scheduler jobs, awake scheduler, and background review/consolidation jobs.
+
+Steward2 currently has steward semantics modules, but does **not** yet have the steward-owned autonomous control plane that makes those modules behave like a live steward.
+
+### Invariant
+
+Steward2 must be able to operate in two distinct but compatible modes without changing its inner truth contract:
+- `assistant-turn mode`: respond correctly to inbound user/channel turns through OpenClaw
+- `autonomous steward mode`: when no inbound turn is active, the host can deterministically observe state, classify the next justified work, seed bounded steward-owned tasks, and run background maintenance/review/consolidation jobs without waiting for operator prompts
+
+The invariant is not "run background tasks somehow". The invariant is:
+- autonomy entry is host-owned
+- autonomy cadence is host-owned
+- allowed autonomous task classes are host-owned
+- budget limits and operator hierarchy remain host-owned
+- truth/proof/consequence rules remain identical in both assistant-turn and autonomous modes
+- autonomous work writes to the same steward DB ledger as normal turns
+- autonomous work cannot degrade into prompt-only improvisation or uncontrolled self-generated churn
+
+### Donor intent and real code paths
+
+#### PEQS steward donor (first steward)
+
+Primary runtime files reviewed:
+- `C:\ai_agent\PEQS\interfaces\daemon.py`
+- `C:\ai_agent\PEQS\core\controller.py`
+- `C:\ai_agent\PEQS\core\goals.py`
+- `C:\ai_agent\PEQS\core\maintenance_governor.py`
+- `C:\ai_agent\PEQS\core\metacog_monitor.py`
+- `C:\ai_agent\PEQS\core\self_improvement.py`
+- `C:\ai_agent\PEQS\PEQS_PROJECT_BRIEF.md`
+
+What PEQS actually does:
+- daemon loop restarts controller after crashes and keeps periodic system ticks alive
+- boot path runs capabilities check, first-contact bootstrap, continuity-window seeding, and budget checks
+- if no active task exists, controller creates or resumes goal-owned work through `_seed_from_goals_if_needed()`
+- every loop also runs system ticks:
+  - `self_improvement_tick`
+  - `strategy_validation_tick`
+  - `metacog_tick`
+  - `maintenance_governor.run_tick`
+  - heuristics decay and budget warnings
+- goal phase progression is autonomous and DB-driven, not operator-prompt driven
+
+Important PEQS traits to preserve:
+- fresh-boot self-start behavior
+- deterministic waiting/blocking state when no seedable work exists
+- periodic maintenance and anomaly observation independent of operator chat
+- autonomous goal/work seeding from DB state
+- truth-first and stewardship-first mission framing remains intact during autonomous work
+
+#### OLD_AI donor
+
+Primary runtime files reviewed:
+- `C:\ai_agent\OLD_AI\interfaces\daemon.py`
+- `C:\ai_agent\OLD_AI\core\controller.py`
+- `C:\ai_agent\OLD_AI\core\autonomy.py`
+- `C:\ai_agent\OLD_AI\core\goal_orchestrator.py`
+- `C:\ai_agent\OLD_AI\core\scheduler.py`
+- `C:\ai_agent\OLD_AI\core\awake_scheduler.py`
+- `C:\ai_agent\OLD_AI\jobs\daily_self_review.py`
+- `C:\ai_agent\OLD_AI\jobs\sleep_consolidation.py`
+- `C:\ai_agent\OLD_AI\README.md`
+- `C:\ai_agent\OLD_AI\AGENT_PRIMER.md`
+
+What OLD_AI actually does:
+- seeds a bootstrap task on empty DB
+- maintains planning / bootstrap / exec / review / chat lane separation
+- runs a central seed scheduler on boot and on idle ticks
+- runs a goal orchestrator independent of idle state
+- when idle, seeds one bounded internal task deterministically via `core.autonomy.seeded_on_idle()`
+- runs scheduler jobs only when conditions/cadence allow
+- includes dedicated jobs for:
+  - `daily_self_review`
+  - `sleep_consolidation`
+  - metacog monitor cadence
+  - weekly goal review / monitoring classes
+- uses awake scheduling as a bounded fallback path, not as uncontrolled spam
+
+Important OLD_AI traits to preserve:
+- deterministic idle seeding instead of passive waiting
+- explicit scheduler/job cadence ownership
+- bounded internal maintenance work classes
+- planning/handoff separation from normal execution
+- review/consolidation jobs as host-triggered recurring work, not manual commands
+
+### Steward2 current state versus donor behavior
+
+Already present in Steward2 as steward-owned modules:
+- DB runtime authority
+- truth audit
+- proof judge
+- consequence logic
+- mission hierarchy
+- time budget
+- task value
+- heuristics
+- metacog monitor
+- maintenance governor
+- self-improvement
+- LM Studio lifecycle mapping has started
+
+Already wired into the current Steward2 turn-completion seam:
+- `runMetacogMonitorTick()`
+- `runMaintenanceGovernorTick()`
+- `runSelfImprovementTick()`
+- task value / proof / runtime completion evidence
+
+Still missing from Steward2 as autonomous runtime behavior:
+- autonomous boot triage and first-task seeding
+- idle-time deterministic task seeding
+- background cadence scheduler owned by steward runtime
+- goal/planning/handoff loop for autonomous work selection
+- `daily self-review`
+- `sleep consolidation`
+- PEQS-style recurring `strategy_validation`
+- explicit autonomous wait/block state machine separate from "no user turn yet"
+
+This is the exact reason the current gateway can be healthy while still not behaving like the intended steward.
+
+### Architectural decision
+
+Do **not** try to hide autonomy inside OpenClaw heartbeat noise, channel background pushes, or generic cron surfaces.
+
+Autonomy must be added as a dedicated steward-owned control plane under `src/steward/` with explicit OpenClaw seams:
+- OpenClaw continues to own gateway, channels, sessions, tool execution, and user-turn runtime
+- Steward owns autonomous runtime policy, cadence, task seeding, and background job state
+- OpenClaw files should only expose the seam that lets the steward autonomy runner wake, inspect state, and inject steward-owned work into the runtime DB/session bridge
+
+### Steward2 target design
+
+Add a new steward-owned autonomy layer:
+- `src/steward/autonomy/*`
+
+Required ownership in this layer:
+- boot sequence state and bootstrap evidence
+- idle detection for steward autonomy mode
+- autonomy policy / permitted job classes
+- autonomy scheduler cadence + cooldowns + duplicate suppression
+- autonomous task seeding into steward flow/task tables
+- background job runners and evidence writers
+- deployment-mode flags: assistant-only vs mixed assistant+autonomy
+
+OpenClaw seam expectations:
+- one host-owned runner/heartbeat seam that can call the autonomy tick when no inbound steward turn is active
+- no planner/model decides when the autonomy tick runs
+- no autonomy module writes outside the steward runtime path without DB evidence
+
+### Missing module map to add to Steward2
+
+#### WS-I — autonomous control plane
+- `src/steward/autonomy/autonomy-runner.ts`
+  - top-level tick entrypoint
+  - decides whether autonomy is allowed to run now
+  - calls boot/idle/scheduler paths in deterministic order
+- `src/steward/autonomy/autonomy-policy.ts`
+  - assistant-only vs autonomous-enabled mode
+  - quiet hours / operator block / manual pause / budget gates
+  - max autonomous tasks per window
+- `src/steward/autonomy/autonomy-state.ts`
+  - steward_kv-backed last-run timestamps, cooldowns, boot completion, idle backoff, blocked reasons
+- `src/steward/autonomy/boot-sequence.ts`
+  - capabilities snapshot
+  - runtime snapshot / triage
+  - first steward bootstrap work seed
+- `src/steward/autonomy/idle-seeding.ts`
+  - deterministic next-task seeding when no inbound turn is active
+  - bounded one-task-per-tick behavior
+- `src/steward/autonomy/work-classifier.ts`
+  - chooses between goal work, diagnostic work, maintenance work, review/consolidation work
+  - host-owned; model can supply content only after class chosen
+- `src/steward/autonomy/scheduler.ts`
+  - cadence registry for recurring jobs
+  - idle-only / non-idle-safe flags
+  - cooldown and duplicate suppression
+
+#### WS-J — recurring autonomous jobs
+- `src/steward/jobs/daily-self-review.ts`
+  - donor: `OLD_AI/jobs/daily_self_review.py`
+  - extracts stable lessons and emits steward memory/evidence
+- `src/steward/jobs/sleep-consolidation.ts`
+  - donor: `OLD_AI/jobs/sleep_consolidation.py`
+  - day summary / episodic consolidation / memory archive behavior adapted to Steward2 DB
+- `src/steward/jobs/strategy-validation.ts`
+  - donor: `PEQS/core/strategy_validator.py`
+  - recurring validation gate for candidate strategies/opportunities already in steward memory/goal state
+- `src/steward/jobs/job-types.ts`
+  - typed results, cadence, evidence contracts
+
+#### WS-K — autonomous goal orchestration
+- `src/steward/autonomy/goal-orchestrator.ts`
+  - active-goal selection
+  - phase/handoff/next proof-first task generation
+- `src/steward/autonomy/triage-artifacts.ts`
+  - writes bounded triage/evidence summaries into steward DB or artifact store
+- `src/steward/autonomy/autonomy-bridge.ts`
+  - seam adapter from OpenClaw host heartbeat/background loop into autonomy-runner
+
+### Explicit donor-to-target mapping
+
+`daily self-review`
+- donor: `OLD_AI/jobs/daily_self_review.py`
+- target: `src/steward/jobs/daily-self-review.ts`
+- must preserve:
+  - bounded cadence
+  - one review artifact/job per period
+  - extraction of stable rules/preferences/facts into steward memory
+  - no silent self-modification side effects
+
+`sleep consolidation`
+- donor: `OLD_AI/jobs/sleep_consolidation.py`
+- target: `src/steward/jobs/sleep-consolidation.ts`
+- must preserve:
+  - episodic/day summary generation
+  - long-term memory consolidation behavior adapted to steward DB
+  - pruning/archive rules with explicit evidence
+  - host-owned cadence; not triggered by model choice
+
+`strategy_validation`
+- donor: `PEQS/core/strategy_validator.py`
+- target: `src/steward/jobs/strategy-validation.ts`
+- must preserve:
+  - explicit validation gate
+  - quantitative proof/evidence threshold
+  - bounded retry/cooldown behavior
+  - operator safety / truth-first framing, not growth-hacking behavior
+
+### Implementation order
+
+No implementation starts until this map is accepted. Then implement in this order:
+
+1. `WS-IA` — autonomy state and policy
+- add `autonomy-state.ts`, `autonomy-policy.ts`
+- define mode flags, cooldowns, blocked reasons, budget windows
+
+2. `WS-IB` — boot sequence
+- add `boot-sequence.ts`
+- produce deterministic startup snapshot + first autonomy evidence
+- do **not** seed arbitrary work yet beyond bounded bootstrap classification
+
+3. `WS-IC` — idle seeding runner
+- add `autonomy-runner.ts` and `idle-seeding.ts`
+- deterministic one-task autonomy tick
+- assistant-turn runtime and autonomy runtime must not overlap unsafely
+
+4. `WS-JA` — daily self-review job
+- port and adapt `daily self-review`
+- DB evidence + memory writes required
+
+5. `WS-JB` — sleep consolidation job
+- port and adapt `sleep consolidation`
+- DB evidence + archival/consolidation outputs required
+
+6. `WS-JC` — strategy validation job
+- port and adapt `strategy_validation`
+- must connect to steward proof/truth/memory state, not legacy PEQS tables
+
+7. `WS-K` — autonomous goal orchestration and host seam integration
+- add goal/handoff/autonomy bridge
+- connect autonomy runner to the chosen OpenClaw heartbeat/background seam
+
+### Blockers and decisions resolved before implementation
+
+- `BD-AUTO-1` — **RESOLVED**
+  - chosen OpenClaw host seam: the existing heartbeat/background runner is the **wake source only** for steward autonomy
+  - target seam owner: `src/steward/autonomy/autonomy-bridge.ts`
+  - host responsibility:
+    - wake the steward autonomy bridge on deterministic background cadence
+    - provide current session/agent/runtime context needed to decide whether autonomy may run
+  - steward responsibility:
+    - decide whether autonomy is allowed to run
+    - classify autonomy work
+    - enforce one-task-per-tick / cooldown / duplicate rules
+  - rejected design:
+    - heartbeat prompt content or planner-produced fake "autonomy" inside a normal user turn
+    - OpenClaw heartbeat scheduler directly deciding which steward job/task to run
+
+- `BD-AUTO-2` — **RESOLVED**
+  - mutual exclusion owner: steward runtime DB authority
+  - rule:
+    - autonomy may run only when the relevant steward runtime session is not in `running`
+    - inbound user turns always win over autonomous turns
+    - if runtime state is `running`, autonomy tick returns blocked with persisted reason `user_turn_active`
+    - if runtime state is `waiting` or `blocked`, autonomy policy may still decide no-op/blocked based on the slice-specific rules, but may not create overlapping execution for the same session
+  - implementation consequence:
+    - `WS-IA` must expose a typed policy result for `user_turn_active`
+    - `WS-IC` and `WS-K` must read runtime authority before seeding autonomous work
+
+- `BD-AUTO-3` — **RESOLVED**
+  - Steward2 deployment mode flag values:
+    - `assistant_only`
+    - `assistant_plus_autonomy`
+    - `autonomy_paused`
+  - default during current rollout: `assistant_only`
+  - no deployment/live testing that expects autonomous steward behavior is valid until mode is explicitly switched to `assistant_plus_autonomy`
+  - ownership:
+    - persisted in steward DB state via autonomy policy/state modules
+    - not owned by prompt text or channel config alone
+
+- `BD-AUTO-4` — **RESOLVED**
+  - canonical authority: DB-first
+  - autonomous triage/report/consolidation artifacts must always exist in steward DB/event state
+  - optional file mirrors are allowed for human inspection, but are mirrors only and must not be the canonical source of truth
+  - consequence for implementation:
+    - `WS-IB`, `WS-JA`, `WS-JB`, and `WS-K` must persist typed DB evidence first
+    - if file mirrors are added later, reviewer checks DB evidence, not mirror presence
+
+- `BD-AUTO-5` — **RESOLVED**
+  - `strategy_validation` scope in Steward2 is **opportunity validation only** for this tranche
+  - meaning:
+    - validate candidate opportunities/strategies/proposals already represented in steward memory/goal/proof state
+    - do not reopen the full PEQS trading-specific live strategy stack in this tranche
+  - preserved invariant:
+    - recurring validation gate exists and is host-owned
+    - truth/proof/evidence thresholds remain explicit
+    - validation outputs can later support broader opportunity classes without changing the ownership model
+
+- `BD-AUTO-6` — **RESOLVED**
+  - scheduler versus work-classifier dispatch split:
+    - scheduler owns **when** a recurring job class becomes due
+    - work-classifier owns **what kind** of non-recurring autonomous work should be seeded when the system is idle
+    - recurring jobs (`daily self-review`, `sleep consolidation`, `strategy_validation`) are dispatched by the autonomy scheduler, not by the work-classifier
+    - the work-classifier may return a generic `review_or_consolidation` class for non-recurring autonomous work, but it must not own cadence for named recurring jobs
+  - consequence for implementation:
+    - `WS-JA`, `WS-JB`, and `WS-JC` are scheduler-driven jobs
+    - `WS-IC` work-classifier must not absorb recurring-job cadence logic
+
+### Acceptance before deployment testing resumes
+
+The autonomy tranche is not done until these are visible in code and runtime evidence:
+- fresh start produces a bounded boot snapshot / triage record without operator prompting
+- when no inbound turn is active, Steward2 can seed exactly one justified autonomous task through a host-owned autonomy tick
+- autonomy cooldowns and blocked reasons are persisted in steward DB state
+- `daily self-review` runs on cadence and writes steward evidence/memory
+- `sleep consolidation` runs on cadence and writes consolidation evidence
+- `strategy_validation` exists as a steward-owned recurring validation gate
+- truth/proof/consequence/mission invariants remain enforced for autonomous tasks exactly as for normal turns
+- one live run shows useful autonomous activity without runaway task spawning or silent idle waiting
+
+### Process rule for this tranche
+
+Do not claim Steward2 is ready for deployment testing as a real steward until the autonomous control-plane tranche above is implemented or explicitly deferred by a new approved spec decision with a narrower deployment goal.
+## Autonomy tranche — review-ready execution plan
+
+### Why this tranche exists
+
+Reviewer and implementer must evaluate this tranche against the same question:
+
+**Is Steward2 only a bounded assistant shell with steward semantics, or is it becoming the autonomous steward that PEQS and OLD_AI were actually trying to be?**
+
+This tranche exists because the current answer is still the first one.
+
+What is already true in Steward2:
+- truth discipline exists
+- proof judgment exists
+- consequence policy exists
+- stewardship mission/value/heuristics exist
+- maintenance/metacog/self-improvement modules exist
+
+What is not yet true:
+- the steward does not boot into bounded autonomous behavior
+- the steward does not seed its own justified work when idle
+- the steward does not run recurring self-review / consolidation / validation jobs on a steward-owned cadence
+- the steward does not yet expose the same autonomous control-plane behavior that defined the first steward and `OLD_AI`
+
+So the review target for this tranche is not stylistic. It is structural:
+- does the new autonomy layer create a host-owned autonomous steward
+- without weakening truth/proof/consequence/mission invariants
+- without collapsing into unbounded self-generated churn
+- and without hiding autonomy inside generic OpenClaw background noise
+
+### Review standard for the entire autonomy tranche
+
+The reviewer must evaluate each slice against these tranche-level questions:
+- Is ownership clear between OpenClaw shell and steward autonomy core?
+- Is the autonomy entrypoint host-owned rather than planner-owned?
+- Are autonomous tasks bounded by explicit cadence, cooldown, budget, and duplicate-suppression rules?
+- Do autonomous tasks persist through the same steward DB authority as normal turns?
+- Do truth/proof/consequence/mission rules still apply identically in autonomous mode?
+- Does the slice create real autonomous behavior, not just another helper module waiting to be called later?
+
+The implementer must not advance a slice by saying it compiles. The reviewer must not pass a slice just because the module exists.
+
+### Global blockers for the autonomy tranche
+
+These must be resolved in spec before implementation opens on dependent slices.
+
+- `BD-AUTO-1` — exact OpenClaw host seam for autonomy tick invocation
+- `BD-AUTO-2` — mutual exclusion between inbound user turns and autonomy turns
+- `BD-AUTO-3` — deployment mode flag (`assistant-only`, `assistant+autonomy`, `operator-paused autonomy`)
+- `BD-AUTO-4` — autonomy artifact location (`DB-only` vs `DB + file mirror`)
+- `BD-AUTO-5` — `strategy_validation` scope in Steward2
+
+### WS-IA — autonomy state and policy
+
+#### Purpose
+Create the steward-owned authority for whether autonomy may run at all, under what mode, with what cooldowns, and with what blocked reasons.
+
+Without WS-IA, every later autonomy slice would be structurally unsafe because there would be no single owner for autonomous execution policy.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/autonomy/`:
+- `autonomy-state.ts`
+- `autonomy-policy.ts`
+
+Required responsibilities:
+- `steward_kv`-backed storage for:
+  - autonomy mode
+  - last autonomy tick ts
+  - boot completion state
+  - idle backoff state
+  - blocked reason
+  - next allowed tick ts / cooldowns
+- explicit policy API for:
+  - autonomy enabled/disabled
+  - operator-paused state
+  - assistant-only mode
+  - budget gate
+  - quiet/blocked state if supported
+- deterministic "may autonomy run now" decision object with reason codes
+
+Dependencies:
+- Workstream A DB authority on `main`
+- resolution of `BD-AUTO-3`
+
+Acceptance:
+- autonomy mode is persisted and queryable
+- blocked reasons are persisted and queryable
+- a host caller can deterministically ask whether autonomy may run now and receive a typed answer
+- no OpenClaw file owns these policy decisions directly
+
+Reviewer focus:
+- ownership of autonomy policy is fully steward-owned
+- no planner/model discretion is involved
+- all state required by later slices is present and persisted
+- blocked reasons are explicit, not implicit booleans
+
+Required verification:
+- focused unit tests for state reads/writes and policy decisions
+- TypeScript clean
+
+Advancement gate condition:
+- no later slice should need to invent autonomy policy or hidden cooldown logic
+
+### WS-IB — boot sequence
+
+#### Purpose
+Port the donor behavior that a real steward does something bounded and inspectable at boot before waiting passively.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/autonomy/`:
+- `boot-sequence.ts`
+
+Required responsibilities:
+- deterministic startup snapshot
+- capability/health snapshot using available host state
+- bounded triage classification
+- persisted boot evidence in steward DB
+- optional first bootstrap task classification, but **no** uncontrolled general seeding
+
+Dependencies:
+- `WS-IA`
+- resolution of `BD-AUTO-4`
+
+Acceptance:
+- fresh runtime can record boot evidence without operator prompting
+- boot runs once per defined lifecycle, not every random tick
+- boot writes a bounded record of what was seen and what the next justified action class is
+- boot can leave the system in an explicit "waiting for next autonomy step" state
+
+Reviewer focus:
+- this is a real steward boot path, not just a log line
+- boot evidence is bounded and persisted
+- no hidden task spam is introduced at startup
+- boot output is good enough to support later autonomous seeding decisions
+
+Required verification:
+- focused tests for first boot, repeat boot/idempotency, and blocked boot states
+- TypeScript clean
+
+Advancement gate condition:
+- reviewer can point to the persisted boot snapshot / triage evidence and explain exactly what autonomy now knows after startup
+
+### WS-IC — idle seeding runner
+
+#### Purpose
+Create the first real autonomy path: when no inbound turn is active, the host can call one steward-owned autonomy tick that seeds at most one justified next task.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/autonomy/`:
+- `autonomy-runner.ts`
+- `idle-seeding.ts`
+- `work-classifier.ts`
+
+Required responsibilities:
+- deterministic autonomy tick entrypoint
+- one-task-per-tick bound
+- duplicate suppression
+- idle backoff/cooldown handling
+- work classification among:
+  - goal work
+  - diagnostic work
+  - maintenance work
+  - review/consolidation work
+- autonomous task creation through steward DB flow/task authority
+
+Dependencies:
+- `WS-IA`
+- `WS-IB`
+- resolution of `BD-AUTO-1` and `BD-AUTO-2`
+
+Acceptance:
+- when no inbound turn is active, host can call autonomy tick and get one of:
+  - blocked with persisted reason
+  - no-op with persisted reason
+  - exactly one seeded task with persisted evidence
+- no more than one new autonomous task is created per eligible tick
+- autonomy tick does not bypass consequence/proof/mission ownership by writing directly to fake completion state
+
+Reviewer focus:
+- this is the first slice that proves Steward2 can actually self-start work
+- mutual exclusion with user turns is real and host-owned
+- no task fan-out or hidden loop behavior exists
+- work classification is explicit and deterministic
+
+Required verification:
+- focused tests for blocked, noop, and seeded outcomes
+- tests for duplicate suppression / backoff
+- tests that a user-active runtime blocks autonomy seeding
+- TypeScript clean
+
+Advancement gate condition:
+- one live or harnessed run shows a single justified autonomous task being seeded by the host-owned autonomy tick
+
+### WS-JA — daily self-review job
+
+#### Purpose
+Port the donor self-review job into Steward2 as a recurring steward-owned job, not a manual command.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/jobs/`:
+- `daily-self-review.ts`
+- `job-types.ts` if not already created
+
+Donor:
+- `OLD_AI/jobs/daily_self_review.py`
+
+Required responsibilities:
+- one review job per period via cadence/dedupe
+- review evidence persisted in steward DB
+- stable lessons/rules/preferences/facts promoted into steward memory through explicit typed writes
+- no auto-code-modification side effects
+
+Dependencies:
+- `WS-IA`
+- `WS-IC`
+
+Acceptance:
+- job can be scheduled and run once per cadence window
+- output is persisted and queryable
+- memory extraction is bounded and explicit
+- reruns respect dedupe/cooldown
+
+Reviewer focus:
+- this is a real recurring self-review job, not a prompt helper
+- memory extraction is typed and bounded
+- no silent self-modification behavior sneaks in
+
+Required verification:
+- focused tests for cadence, dedupe, and memory extraction
+- TypeScript clean
+
+Advancement gate condition:
+- reviewer can point to one persisted self-review record and the resulting steward memory updates
+
+### WS-JB — sleep consolidation job
+
+#### Purpose
+Port consolidation of episodic runtime output into steward-owned periodic memory/archive behavior.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/jobs/`:
+- `sleep-consolidation.ts`
+
+Donor:
+- `OLD_AI/jobs/sleep_consolidation.py`
+
+Required responsibilities:
+- bounded periodic consolidation run
+- day/episode summary generation
+- archive/prune behavior adapted to Steward2 DB
+- explicit evidence events for what was consolidated/pruned
+
+Dependencies:
+- `WS-IA`
+- `WS-IC`
+- resolution of `BD-AUTO-4`
+
+Acceptance:
+- consolidation can run on cadence and produce persisted summary evidence
+- pruning/archive rules are explicit and auditable
+- consolidation updates do not corrupt active runtime state
+
+Reviewer focus:
+- this is genuine consolidation, not arbitrary deletion
+- stewardship memory/archive semantics are preserved in the new DB model
+- retention/pruning behavior is bounded and evidenced
+
+Required verification:
+- focused tests for summary generation, cadence, and pruning/archive evidence
+- TypeScript clean
+
+Advancement gate condition:
+- reviewer can inspect persisted consolidation evidence and explain what was summarized and why nothing unsafe was pruned
+
+### WS-JC — strategy validation job
+
+#### Purpose
+Restore PEQS-style recurring validation as a steward-owned gate for candidate opportunities/strategies, adapted to Steward2’s inner truth/proof/memory model.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/jobs/`:
+- `strategy-validation.ts`
+
+Donor:
+- `PEQS/core/strategy_validator.py`
+
+Required responsibilities:
+- cadence/cooldown for validation attempts
+- explicit validation inputs from steward DB state
+- pass/reject evidence persisted to steward DB
+- operator-safe, truth-first framing retained
+- no dependency on legacy PEQS table structure
+
+Dependencies:
+- `WS-IA`
+- `WS-IC`
+- resolution of `BD-AUTO-5`
+
+Acceptance:
+- validation job can run on cadence against current steward candidate state
+- validation emits explicit approve/reject evidence
+- repeated failed validation attempts are bounded by cooldown / burn logic if applicable
+
+Reviewer focus:
+- this is a true steward-owned validation gate, not a floating helper function
+- inputs come from Steward2 state, not legacy assumptions
+- truth and operator safety remain stronger than growth pressure
+
+Required verification:
+- focused tests for approve/reject/cooldown behavior
+- TypeScript clean
+
+Advancement gate condition:
+- reviewer can point to one complete validation decision path with persisted evidence
+
+### WS-K — autonomous goal orchestration and host seam integration
+
+#### Purpose
+Close the loop so autonomy is not just a set of jobs. This slice connects autonomous work selection, goal/handoff logic, and the chosen OpenClaw seam.
+
+#### Implementer scope
+Implementer (Codex): create these modules under `src/steward/autonomy/`:
+- `goal-orchestrator.ts`
+- `triage-artifacts.ts`
+- `autonomy-bridge.ts`
+
+Required responsibilities:
+- active-goal selection / next-proof-first work derivation
+- bounded handoff/triage artifact persistence
+- connection from the chosen OpenClaw host seam into `autonomy-runner.ts`
+- no overlap between assistant-turn execution and autonomy-turn execution
+
+Dependencies:
+- `WS-IA`
+- `WS-IB`
+- `WS-IC`
+- `WS-JA`
+- `WS-JB`
+- `WS-JC`
+- resolution of `BD-AUTO-1` and `BD-AUTO-2`
+
+Acceptance:
+- chosen host seam can invoke autonomy runner safely
+- autonomy can select justified goal-oriented next work, not only maintenance work
+- handoff/triage evidence is persisted and reviewable
+- live autonomy remains bounded under budget and duplicate rules
+
+Reviewer focus:
+- this is the slice that decides whether Steward2 has become a real steward runtime
+- host seam ownership is explicit and correct
+- autonomous goal orchestration is real, bounded, and evidence-producing
+
+Required verification:
+- focused tests for bridge invocation, mutual exclusion, and goal-oriented seeding
+- at least one live/harnessed run showing boot -> autonomy tick -> seeded work -> persisted evidence
+- TypeScript clean
+
+Advancement gate condition:
+- reviewer can say Steward2 now has a steward-owned autonomous control plane, not merely autonomy-related modules
+
+### Autonomy tranche command shapes
+
+These are the expected next-command forms once blockers are resolved:
+- `STEWARD2 SPEC-Q: resolve BD-AUTO-1 through BD-AUTO-5 before opening WS-IA`
+- `STEWARD2 IMPLEMENT WS-IA`
+- `STEWARD2 REVIEW WS-IA`
+- `STEWARD2 ADVANCE WS-IA`
+- `STEWARD2 IMPLEMENT WS-IB`
+- `STEWARD2 REVIEW WS-IB`
+- `STEWARD2 ADVANCE WS-IB`
+- `STEWARD2 IMPLEMENT WS-IC`
+- `STEWARD2 REVIEW WS-IC`
+- `STEWARD2 ADVANCE WS-IC`
+- `STEWARD2 IMPLEMENT WS-JA`
+- `STEWARD2 REVIEW WS-JA`
+- `STEWARD2 ADVANCE WS-JA`
+- `STEWARD2 IMPLEMENT WS-JB`
+- `STEWARD2 REVIEW WS-JB`
+- `STEWARD2 ADVANCE WS-JB`
+- `STEWARD2 IMPLEMENT WS-JC`
+- `STEWARD2 REVIEW WS-JC`
+- `STEWARD2 ADVANCE WS-JC`
+- `STEWARD2 IMPLEMENT WS-K`
+- `STEWARD2 REVIEW WS-K`
+- `STEWARD2 ADVANCE WS-K`
+
+### Final tranche-close gate for autonomy
+
+The autonomy tranche is only close-ready when reviewer and implementer can both defend these statements with code and runtime evidence:
+- Steward2 can start in bounded autonomous steward mode without operator prompting
+- Steward2 can seed its own next justified work when idle
+- `daily self-review`, `sleep consolidation`, and `strategy_validation` exist as steward-owned recurring jobs
+- truth/proof/consequence/mission invariants remain intact under autonomous execution
+- the OpenClaw shell still owns shell concerns, and the steward core owns autonomy concerns
+- one live bounded run demonstrates useful autonomous activity instead of passive waiting or uncontrolled self-generated churn
+
+### WS-IA implementation gate (2026-04-29)
+
+Implementer (Codex): implemented `WS-IA` on branch `ws-ia`.
+
+Files added:
+- `src/steward/autonomy/autonomy-state.ts`
+- `src/steward/autonomy/autonomy-policy.ts`
+- `src/steward/autonomy/autonomy-state.test.ts`
+- `src/steward/autonomy/autonomy-policy.test.ts`
+
+Files modified:
+- `src/steward/db/runtime-schema.ts`
+
+What `WS-IA` now owns:
+- DB-backed autonomy mode state in `steward_kv`
+- typed autonomy mode values:
+  - `assistant_only`
+  - `assistant_plus_autonomy`
+  - `autonomy_paused`
+- DB-backed autonomy policy state:
+  - `lastAutonomyTickTs`
+  - `bootCompleted`
+  - `idleBackoffMs`
+  - `lastBlockedReason`
+  - `nextAllowedTickTs`
+  - `updatedTs`
+- typed blocked reasons:
+  - `assistant_only_mode`
+  - `autonomy_paused`
+  - `user_turn_active`
+  - `cooldown_active`
+  - `boot_not_complete`
+  - `budget_blocked`
+- deterministic policy evaluation through `evaluateAutonomyRunPolicy(...)`
+
+Invariant achieved in this slice:
+- autonomy policy is now steward-owned and queryable from the steward DB
+- host code can ask one typed question: may autonomy run now for this session?
+- the answer is deterministic and does not depend on planner/model discretion
+- the user-turn mutual-exclusion rule is represented as a first-class policy outcome: `user_turn_active`
+- no OpenClaw file owns autonomy mode/cooldown/blocked-reason logic directly
+
+Behavior implemented:
+- default mode is `assistant_only`
+- enabling autonomy without completed boot yields `boot_not_complete`
+- active steward runtime state `running` yields `user_turn_active`
+- future cooldown state yields `cooldown_active`
+- budget gate can be passed in structurally and yields `budget_blocked`
+- successful policy evaluation returns a typed allowed decision and emits a typed event
+
+Typed event kinds added:
+- `autonomy.mode.updated`
+- `autonomy.policy.allowed`
+- `autonomy.policy.blocked`
+
+Focused acceptance evidence:
+- autonomy mode is persisted and queryable
+- blocked reasons are persisted and queryable
+- host caller receives a typed policy decision object
+- policy resolves the `BD-AUTO-2` mutual-exclusion requirement via runtime-state inspection
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-state.test.ts src/steward/autonomy/autonomy-policy.test.ts`
+  - PASS: `2` files, `8` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Next process step:
+- reviewer gate for `WS-IA`
+
+### Autonomy plan reviewer gate (2026-04-29)
+
+Reviewer: Claude Code
+
+Verdict: **PASS.**
+
+Findings:
+
+1. **Tranche rationale** — sound. Diagnosis accurate: existing steward modules are passive helpers wired to turn-completion seams. The two-mode invariant (assistant-turn / autonomous steward, same truth/proof/consequence rules, same DB ledger, no model discretion on cadence) is the correct framing.
+
+2. **Blocker set** — complete and load-bearing. All five blockers correctly assigned to dependent slices. Note: BD-AUTO-1 (host seam choice) constrains BD-AUTO-2 (mutual exclusion design) — resolve together in one SPEC-Q, not sequentially.
+
+3. **Per-slice gates** — sound. Sequence correct (WS-IA → WS-IB → WS-IC → WS-JA/JB/JC → WS-K). Each slice has implementer scope, acceptance, reviewer focus, and advancement gate condition requiring behavioral evidence, not just compilation.
+
+4. **Deployment-close criteria** — correct and enforceable. Boot → autonomy tick → seeded task → persisted evidence in one live run is the right bar.
+
+5. **Structural finding (non-blocking, must resolve before WS-JA opens):** `work-classifier.ts` is assigned to WS-IC scope but its relationship to WS-JA/JB/JC is ambiguous — spec does not state whether the scheduler invokes jobs directly, or the work classifier selects the job class and dispatches. Decide and record in the WS-JA SPEC-Q or WS-IC advancement gate.
+
+Next step: `STEWARD2 SPEC-Q: resolve BD-AUTO-1 and BD-AUTO-2 together, then BD-AUTO-3 through BD-AUTO-5, before opening WS-IA`.
+
+
