@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **Tranche-close spec gate complete. Final polish slice remains; next step is implement locale cleanup (2026-04-28).**
+Current phase: **P-1b reviewer gate complete — PASS. Open PR p-1b → main (2026-04-29).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **Tranche-close spec gate complete. Final polish slice remains; next step is implement locale cleanup (2026-04-28).**
+Current phase: **P-1b reviewer gate complete — PASS. Open PR p-1b → main (2026-04-29).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2317,9 +2317,11 @@ Immediate next tasks:
 17. ~~Open PR~~ p-1 → main ✓ PR #12 opened and merged on 2026-04-28
 18. ~~Codex: implement D-1b~~ ✓ done 2026-04-28 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 19. ~~Open PR~~ d-1b → main ✓ PR #13 opened and merged on 2026-04-28
+20. ~~Codex: implement P-1b~~ ✓ done 2026-04-29 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
+21. Open PR p-1b → main
 
 Carry-forward (open):
-- P-1 carry-forward: remove hardcoded Danish locale string from `postcheck-rules.ts` line 75 (non-blocking)
+- ~~P-1 carry-forward: remove hardcoded Danish locale string from `postcheck-rules.ts` line 75~~ ✓ closed by P-1b (2026-04-29)
 - ~~P-1 carry-forward: wire `sessionKey` into gateway path (`tools-invoke-http.ts`) so postcheck events are persisted for gateway-invoked tools~~ ✓ already satisfied on `main` by P-1 merge state reconciliation (2026-04-28) — gateway path now passes `sessionKey` into `postcheckToolResult`
 - ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
 - ~~Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed~~ ✓ closed by D-1b (2026-04-28)
@@ -3066,7 +3068,7 @@ Closed by D-1b merge:
 - D-1 compatibility-shim deprecation carry-forward
 
 Open carry-forward after D-1b merge:
-- remove the redundant hardcoded Danish locale string from `src/steward/tool/postcheck-rules.ts`
+- ~~remove the redundant hardcoded Danish locale string from `src/steward/tool/postcheck-rules.ts`~~ ✓ closed by P-1b (2026-04-29)
 
 Next process step: run a tranche-close spec gate to decide whether that remaining cleanup slice must be implemented before deployment testing, or can stay as a non-blocking polish item.
 
@@ -3096,3 +3098,46 @@ Acceptance for P-1b:
 
 Next command:
 `STEWARD2 IMPLEMENT P-1b`
+
+### P-1b implementation gate (2026-04-28)
+
+Implementer (Codex): implement final follow-up slice P-1b on branch `p-1b`.
+
+Invariant:
+- deterministic tool-failure classification must rely on locale-independent signals where those already exist; redundant locale-specific string matching must not remain as a hidden platform-specific branch.
+
+### P-1b implementation output
+
+Implementer (Codex): removed the redundant hardcoded Danish socket-permission string from `src/steward/tool/postcheck-rules.ts`. Locale-independent checks (`winerror 10013`, `socket access permissions`) remain intact. No other postcheck logic changed.
+
+### P-1b verification output
+
+Verifier (Codex): targeted P-1b verification passed on branch `p-1b`.
+
+Evidence:
+- focused postcheck suite passed:
+  - `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts`
+  - result: `1` file, `6` tests, PASS
+- full static check passed:
+  - `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+- runtime evidence:
+  - none required; P-1b is a classifier hygiene cleanup with no intended behavior change beyond removing redundant locale-specific matching
+
+Verdict: **PASS.** P-1b implementation and Codex verification are complete. Next process step is reviewer gate.
+
+### P-1b reviewer gate (2026-04-29)
+
+Reviewer: Claude Code
+
+Evidence reviewed:
+- diff: `src/steward/tool/postcheck-rules.ts` — Danish string and trailing `||` removed; `winerror 10013` and `socket access permissions` locale-independent checks retained intact
+- tests: `corepack pnpm exec vitest run src/steward/tool/tool-supervisor.test.ts` — 1 file, 6 tests, PASS
+- TypeScript: `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — clean
+
+Verdict: **PASS. ADVANCE** — open PR `p-1b → main`.
+
+Closed by P-1b:
+- P-1 carry-forward: hardcoded Danish locale string removed from `postcheck-rules.ts`
+- D-1b carry-forward: same item — now fully closed
+
+No new carry-forwards.

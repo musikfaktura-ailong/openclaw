@@ -71,8 +71,7 @@ function classifyError(toolName: string, error: string): PostcheckVerdict {
   }
   if (
     lowered.includes("winerror 10013") ||
-    lowered.includes("socket access permissions") ||
-    lowered.includes("forbudt af den pågældende sockets adgangstilladelser")
+    lowered.includes("socket access permissions")
   ) {
     return "retry";
   }
