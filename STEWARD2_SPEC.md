@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **P-1b reviewer gate complete — PASS. Open PR p-1b → main (2026-04-29).**
+Current phase: **P-1b merged via PR #14. Tranche-close reconciliation complete; ready for deployment testing (2026-04-29).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2295,7 +2295,7 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase: **P-1b reviewer gate complete — PASS. Open PR p-1b → main (2026-04-29).**
+Current phase: **P-1b merged via PR #14. Tranche-close reconciliation complete; ready for deployment testing (2026-04-29).**
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -2318,15 +2318,10 @@ Immediate next tasks:
 18. ~~Codex: implement D-1b~~ ✓ done 2026-04-28 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
 19. ~~Open PR~~ d-1b → main ✓ PR #13 opened and merged on 2026-04-28
 20. ~~Codex: implement P-1b~~ ✓ done 2026-04-29 — PASS on code and tests; reviewer gate: PASS; ADVANCE issued.
-21. Open PR p-1b → main
+21. ~~Open PR~~ p-1b → main ✓ PR #14 opened and merged on 2026-04-29
 
 Carry-forward (open):
-- ~~P-1 carry-forward: remove hardcoded Danish locale string from `postcheck-rules.ts` line 75~~ ✓ closed by P-1b (2026-04-29)
-- ~~P-1 carry-forward: wire `sessionKey` into gateway path (`tools-invoke-http.ts`) so postcheck events are persisted for gateway-invoked tools~~ ✓ already satisfied on `main` by P-1 merge state reconciliation (2026-04-28) — gateway path now passes `sessionKey` into `postcheckToolResult`
-- ~~Finding D-1 follow-up: either document `action-policy-bridge.ts` as a spec-named compatibility shim or refactor so the file owns the consequence→OpenClaw approval bridge wiring~~ ✓ closed by D-1 (2026-04-27) — `action-policy-bridge.ts` now owns the seam; `consequence-bridge.ts` is an explicit compatibility shim
-- ~~Finding D-1 carry-forward: add `@deprecated` JSDoc to `consequence-bridge.ts` shim with removal target before workstream is fully closed~~ ✓ closed by D-1b (2026-04-28)
-- ~~Finding D-2 follow-up: add `knowledge_store: "truth_gated"` to `TOOL_TAXONOMY`~~ ✓ closed by D-2 (2026-04-27)
-- ~~Finding H-2 follow-up: FRUSTRATION detection uses `mission.task_value.adjudicated` events (score ≤ 3 / label hollow/low_value) rather than proof verdicts~~ ✓ closed by H-2 (2026-04-27) — FRUSTRATION now reads `steward_flow_tasks.link_status = 'failed'` (host-owned terminal state)
+- none
 
 WS-H pre-conditions:
 - E-1 resolved in `src/steward/memory/prompt-context.ts`
@@ -3141,3 +3136,24 @@ Closed by P-1b:
 - D-1b carry-forward: same item — now fully closed
 
 No new carry-forwards.
+
+### P-1b post-merge status (2026-04-29)
+
+P-1b is on `main`:
+- branch `p-1b`
+- PR `#14`
+- merge commit `386fefcb90411a80794159ca48d2542a0c0f0d95`
+
+Closed by P-1b merge:
+- P-1 locale-specific classifier carry-forward
+- final known code cleanup item in the current migration tranche
+
+Open carry-forward after P-1b merge:
+- none
+
+Tranche-close result:
+- the current Steward2 migration tranche is closed
+- no known open implementation or documentation follow-up slices remain in this spec
+
+Next process step:
+- deployment / live evaluation testing for useful steward runtime behavior and LLM thinking quality
