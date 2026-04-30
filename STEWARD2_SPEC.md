@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IA implementation complete on `ws-ia`; ready for reviewer gate (2026-04-29). LM-A PASS — open PR lm-a → main, then LM-B.**
+Current phase: **WS-IA PASS. BD-AUTO-1 revised: heartbeat fires LLM turns — WS-K needs a steward-owned timer, not a heartbeat hook. WS-IB gate tightened. WS-JA/JB/JC ordering clarified. Open PRs: lm-a → main, ws-ia → main. Next: WS-IB (2026-04-30).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3868,19 +3868,17 @@ No implementation starts until this map is accepted. Then implement in this orde
 
 ### Blockers and decisions resolved before implementation
 
-- `BD-AUTO-1` — **RESOLVED**
-  - chosen OpenClaw host seam: the existing heartbeat/background runner is the **wake source only** for steward autonomy
-  - target seam owner: `src/steward/autonomy/autonomy-bridge.ts`
-  - host responsibility:
-    - wake the steward autonomy bridge on deterministic background cadence
-    - provide current session/agent/runtime context needed to decide whether autonomy may run
-  - steward responsibility:
-    - decide whether autonomy is allowed to run
-    - classify autonomy work
-    - enforce one-task-per-tick / cooldown / duplicate rules
-  - rejected design:
+- `BD-AUTO-1` — **RESOLVED (revised 2026-04-30 after reading heartbeat-runner.ts)**
+  - The OpenClaw heartbeat runner fires LLM model turns. It is **not** the direct seam for steward autonomy.
+  - **Correct design:** WS-K adds a steward-owned timer (separate from the heartbeat runner) that calls `autonomy-bridge.ts` → `autonomy-runner.ts` on a steward-defined cadence.
+  - Target seam owner: `src/steward/autonomy/autonomy-bridge.ts` — a timer callback, not a heartbeat wake handler
+  - The OpenClaw startup path that registers the heartbeat runner must be extended to also register the steward autonomy timer. That startup path must be read before WS-K opens.
+  - BD-AUTO-2 mutual exclusion is satisfied by `evaluateAutonomyRunPolicy()` (WS-IA): if `user_turn_active`, the timer skips and re-arms. No additional lock needed.
+  - No changes to `heartbeat-runner.ts` or `heartbeat-wake.ts` are needed.
+  - Rejected designs (unchanged):
     - heartbeat prompt content or planner-produced fake "autonomy" inside a normal user turn
     - OpenClaw heartbeat scheduler directly deciding which steward job/task to run
+    - Wiring `autonomy-bridge.ts` into `runHeartbeatOnce` (this would embed steward autonomy inside the LLM turn path)
 
 - `BD-AUTO-2` — **RESOLVED**
   - mutual exclusion owner: steward runtime DB authority
@@ -4087,6 +4085,8 @@ Required verification:
 
 Advancement gate condition:
 - reviewer can point to the persisted boot snapshot / triage evidence and explain exactly what autonomy now knows after startup
+- specifically, the reviewer must be able to answer from DB evidence alone (no code reading): what did the steward observe at boot; what is the classified next action class; has boot been marked as a one-time event; is the record in a queryable table/event (not stdout)
+- a boot log line or empty DB write does not pass this gate
 
 ### WS-IC — idle seeding runner
 
@@ -4140,6 +4140,8 @@ Advancement gate condition:
 - one live or harnessed run shows a single justified autonomous task being seeded by the host-owned autonomy tick
 
 ### WS-JA — daily self-review job
+
+> **Ordering note (2026-04-30):** WS-JA, WS-JB, and WS-JC are independent of each other. Once WS-IC is merged, all three are unblocked and may be implemented in any order. The sequential listing is a suggestion, not a hard dependency chain. Whichever J slice runs first must create `job-types.ts`; the others extend it.
 
 #### Purpose
 Port the donor self-review job into Steward2 as a recurring steward-owned job, not a manual command.
@@ -4413,6 +4415,24 @@ Verification:
 Next process step:
 - reviewer gate for `WS-IA`
 
+### WS-IA reviewer gate (2026-04-29)
+
+Reviewer: Claude Code
+
+Evidence reviewed:
+- `src/steward/autonomy/autonomy-state.ts` — all 3 mode values typed; all 6 blocked reasons typed; `parseMode` safe default; `parseBlockedReason("")` → null on tick-ran clear; `resolveEventSessionId` validates session in DB; no planner/model discretion anywhere
+- `src/steward/autonomy/autonomy-policy.ts` — block priority order correct (assistant_only → autonomy_paused → user_turn_active → boot_not_complete → cooldown_active → budget_blocked → allowed); `user_turn_active` reads real `runtime.status` from DB (BD-AUTO-2 satisfied); `blockedByUserTurn` flag distinguishes mutual-exclusion case from other blocks; `persistDecision=false` allows read-only inspection
+- all 6 BD-AUTO blockers applicable to WS-IA recorded as RESOLVED before implementation; WS-K seam and artifact decisions correctly deferred
+- tests: `corepack pnpm exec vitest run autonomy-state.test.ts autonomy-policy.test.ts` — 2 files, 8 tests, PASS; all 4 acceptance criteria covered plus event-persistence verified at DB level
+- TypeScript: `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — clean
+
+Plan-level notes recorded for operator awareness:
+- WS-K is the keystone slice — no actual autonomous behavior is possible until `autonomy-bridge.ts` is wired to an OpenClaw host heartbeat; all WS-I/J slices produce infrastructure only. A SPEC-Q on the exact OpenClaw heartbeat surface is essential before WS-K opens.
+- WS-IB (boot sequence) produces passive evidence only; its reviewer must advance it only when a real boot record is inspectable, not just when it compiles.
+- WS-JA/JB/JC are independent of each other within the J group; the ordering in the spec is conservative but not a hard dependency chain.
+
+Verdict: **PASS. ADVANCE** — open PR `ws-ia → main`.
+
 ### Autonomy plan reviewer gate (2026-04-29)
 
 Reviewer: Claude Code
@@ -4432,5 +4452,112 @@ Findings:
 5. **Structural finding (non-blocking, must resolve before WS-JA opens):** `work-classifier.ts` is assigned to WS-IC scope but its relationship to WS-JA/JB/JC is ambiguous — spec does not state whether the scheduler invokes jobs directly, or the work classifier selects the job class and dispatches. Decide and record in the WS-JA SPEC-Q or WS-IC advancement gate.
 
 Next step: `STEWARD2 SPEC-Q: resolve BD-AUTO-1 and BD-AUTO-2 together, then BD-AUTO-3 through BD-AUTO-5, before opening WS-IA`.
+
+---
+
+## SPEC-Q — OpenClaw heartbeat surface for WS-K (2026-04-30)
+
+### What was read
+
+Source files read to answer this SPEC-Q:
+- `src/infra/heartbeat-wake.ts` — full read
+- `src/infra/heartbeat-runner.ts` — full read (key sections: `runHeartbeatOnce`, `run`, `setHeartbeatWakeHandler`, `scheduleNext`)
+- `src/infra/heartbeat-schedule.ts` — full read
+
+### What the OpenClaw heartbeat actually does
+
+The OpenClaw heartbeat is a **model-turn firing system**, not a background job system.
+
+Execution path:
+1. `heartbeat-schedule.ts` — computes per-agent timer intervals (phase-randomized, configurable cadence)
+2. `heartbeat-wake.ts` — coalescing timer module; `setHeartbeatWakeHandler(fn)` registers who handles wakes; `requestHeartbeatNow()` queues a wake with priority/coalesce
+3. `heartbeat-runner.ts` — the wake handler calls `runHeartbeatOnce(opts)` which:
+   - checks `areHeartbeatsEnabled()`, quiet-hours, `queueSize > 0` (skips if busy)
+   - calls `resolveHeartbeatPreflight` (reads `HEARTBEAT.md`, resolves session)
+   - **fires a new LLM agent turn** via `resolveEmbeddedSessionLane` with the heartbeat prompt
+
+The heartbeat system fires LLM inference. Each heartbeat is a model turn, not a function call.
+
+### Critical finding: BD-AUTO-1 resolution must be revised
+
+The resolved BD-AUTO-1 says: "existing heartbeat/background runner is the wake source only."
+
+This is **ambiguous as written** and cannot mean "wire `autonomy-bridge.ts` into `runHeartbeatOnce`." Here is why:
+
+- `runHeartbeatOnce` fires a model turn. If `autonomy-bridge.ts` is called from inside this path, steward autonomy would be embedded inside an LLM inference turn — exactly what the spec prohibits: "heartbeat prompt content or planner-produced fake autonomy inside a normal user turn."
+- The heartbeat runner already checks `queueSize > 0` to skip when a user turn is active. A steward autonomy hook at that level would still run only when the LLM session is idle — but it would be called as part of the LLM turn setup, not as a separate host-owned path.
+
+### Correct interpretation and revised BD-AUTO-1
+
+The heartbeat runner provides two usable surfaces for WS-K:
+
+#### Option A — Parallel steward timer (recommended)
+
+WS-K creates its own host-owned timer loop, separate from the heartbeat runner:
+- Steward initialization registers a `setInterval` (or equivalent) that calls `autonomy-bridge.ts` → `autonomy-runner.ts` directly
+- This timer runs on a steward-owned cadence (e.g. 60s), not the heartbeat cadence
+- It checks `evaluateAutonomyRunPolicy()` first; if `user_turn_active`, it skips and re-arms
+- The OpenClaw startup path must expose a hook to register this timer on process start
+
+**Advantage:** Cleanly separate from the LLM turn path. Autonomy never touches the heartbeat runner.
+
+**Constraint:** Requires finding the right OpenClaw startup/lifecycle hook. Candidate: the same path that calls `createHeartbeatRunner()` in `heartbeat-runner.ts`. Read that initialization seam before WS-K opens.
+
+#### Option B — Pre-LLM hook inside heartbeat runner (not recommended)
+
+Add a hook point inside `runHeartbeatOnce` before the LLM turn fires, when `queueSize === 0`. The steward autonomy tick runs here instead of through the LLM.
+
+**Problem:** This couples steward autonomy cadence to heartbeat cadence. The heartbeat cadence is agent-configured (per-agent, per-channel). Steward autonomy cadence must be steward-owned. This mixes the two ownerships.
+
+### Revised BD-AUTO-1 decision
+
+**BD-AUTO-1 — REVISED (2026-04-30):**
+- The OpenClaw heartbeat runner fires LLM model turns. It is **not** the direct seam for steward autonomy.
+- The heartbeat timer architecture (`heartbeat-wake.ts` + `requestHeartbeatNow`) is the pattern to follow, **not** the surface to reuse.
+- WS-K must add a **steward-owned timer** (separate from the heartbeat runner) that calls `autonomy-bridge.ts` → `autonomy-runner.ts` on a steward-defined cadence.
+- The OpenClaw startup path that initializes the heartbeat runner must be identified and extended with a steward autonomy timer registration. Candidate file: wherever `createHeartbeatRunner` is called — read before WS-K opens.
+- BD-AUTO-2 mutual exclusion: the steward timer calls `evaluateAutonomyRunPolicy()` (WS-IA) first; if `user_turn_active`, it skips and re-arms. No lock needed — the policy function reads DB runtime state.
+
+**Consequence for WS-K scope:**
+- WS-K must read the OpenClaw startup/initialization path to find where to register the steward timer before implementation starts
+- `autonomy-bridge.ts` is a timer callback entry point, not a heartbeat wake handler
+- No changes to `heartbeat-runner.ts` or `heartbeat-wake.ts` are needed for the autonomy path
+
+### What must be read before WS-K opens
+
+- Wherever `createHeartbeatRunner` is called (find the OpenClaw startup/server initialization path)
+- Verify that a steward-owned timer registered at that same level does not conflict with OpenClaw's own startup/cleanup lifecycle
+
+---
+
+## WS-IB advancement gate — tightened (2026-04-30)
+
+The existing WS-IB advancement gate condition reads:
+> "reviewer can point to the persisted boot snapshot / triage evidence and explain exactly what autonomy now knows after startup"
+
+This is the right bar but must be made explicit. A boot log line or an empty DB write does not pass. The reviewer must be able to answer all of these questions from DB evidence alone, without reading the code:
+
+- **What did the steward observe at boot?** (capability/health snapshot content, not just "boot ran")
+- **What is the steward's classified next action class?** (e.g. `seed_first_task`, `wait_for_idle`, `blocked_budget`)
+- **Has boot been marked as a one-time event?** (idempotency: does a second boot record replace or duplicate?)
+- **Is the boot record persisted in a queryable DB table/event, not just stdout?**
+
+If any of these cannot be answered from `SELECT` on the steward DB, WS-IB does not pass.
+
+---
+
+## WS-JA/JB/JC ordering clarification (2026-04-30)
+
+The implementation order in the autonomy tranche lists WS-JA → WS-JB → WS-JC sequentially. This is conservative, not a hard dependency chain.
+
+**Actual dependency structure within the J group:**
+- WS-JA depends on: `WS-IA`, `WS-IC`
+- WS-JB depends on: `WS-IA`, `WS-IC`, `BD-AUTO-4` (artifact location — already resolved)
+- WS-JC depends on: `WS-IA`, `WS-IC`, `BD-AUTO-5` (strategy scope — already resolved)
+- WS-JA, WS-JB, and WS-JC do **not** depend on each other
+
+**Consequence:** Once WS-IC is merged, all three J slices are unblocked. They may be implemented in any order, or if one proves unexpectedly complex, the others may proceed ahead of it. The sequential ordering in the spec is a suggestion, not a constraint.
+
+The one dependency to preserve: `job-types.ts` is created by whichever J slice is first. Later J slices extend it rather than creating it again.
 
 
