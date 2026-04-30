@@ -24,6 +24,8 @@ export type StewardBlockerType =
 export type StewardBlockerStatus = "active" | "resolved";
 
 export type StewardEventKind =
+  | "autonomy.boot.recorded"
+  | "autonomy.boot.skipped"
   | "autonomy.mode.updated"
   | "autonomy.policy.allowed"
   | "autonomy.policy.blocked"

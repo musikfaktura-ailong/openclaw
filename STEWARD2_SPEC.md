@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IA PASS. BD-AUTO-1 revised: heartbeat fires LLM turns — WS-K needs a steward-owned timer, not a heartbeat hook. WS-IB gate tightened. WS-JA/JB/JC ordering clarified. Open PRs: lm-a → main, ws-ia → main. Next: WS-IB (2026-04-30).**
+Current phase: **WS-IB implementation complete on `ws-ib`; ready for reviewer gate. Open PRs: lm-a → main (#15), ws-ia → main (#16). (2026-04-30).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4560,4 +4560,59 @@ The implementation order in the autonomy tranche lists WS-JA → WS-JB → WS-JC
 
 The one dependency to preserve: `job-types.ts` is created by whichever J slice is first. Later J slices extend it rather than creating it again.
 
+## WS-IB implementation gate (2026-04-30)
 
+Implementer (Codex): implemented `WS-IB` on branch `ws-ib`.
+
+Files added:
+- `src/steward/autonomy/boot-sequence.ts`
+- `src/steward/autonomy/boot-sequence.test.ts`
+
+Files modified:
+- `src/steward/db/runtime-schema.ts`
+
+What `WS-IB` now owns:
+- deterministic autonomy boot recording through `recordAutonomyBootSequence(...)`
+- queryable boot capability snapshot:
+  - `dbReady`
+  - `runtimeStatus`
+  - `truthCoreReady`
+  - `lmStudioLifecycleReady`
+  - `autonomyMode`
+- deterministic next action classification:
+  - `wait_for_autonomy_enable`
+  - `wait_for_operator_unpause`
+  - `wait_for_idle`
+  - `seed_first_task`
+- one-time boot completion semantics via `autonomy.boot_completed`
+- typed boot evidence events:
+  - `autonomy.boot.recorded`
+  - `autonomy.boot.skipped`
+
+Invariant achieved in this slice:
+- a fresh steward runtime can write a bounded, inspectable boot record into the steward DB without operator prompting
+- boot classification is host-owned and deterministic
+- boot is idempotent within the current lifecycle; reruns do not generate repeated primary boot records
+- the reviewer can answer from DB evidence alone what the steward observed at boot and what it believes the next action class should be
+
+Behavior implemented:
+- if autonomy is enabled and runtime is not active, boot classifies `seed_first_task`
+- if runtime is already `running`, boot classifies `wait_for_idle`
+- if autonomy mode is `assistant_only`, boot classifies `wait_for_autonomy_enable`
+- if autonomy mode is `autonomy_paused`, boot classifies `wait_for_operator_unpause`
+- once boot has completed, later calls emit `autonomy.boot.skipped` with `already_completed`
+
+Focused acceptance evidence:
+- first boot creates a DB event containing both snapshot and next action class
+- repeat boot is idempotent and emits only a skipped record
+- blocked/observed runtime states are preserved in the boot classification, not hidden
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-state.test.ts src/steward/autonomy/autonomy-policy.test.ts src/steward/autonomy/boot-sequence.test.ts`
+  - PASS: `3` files, `11` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Next process step:
+- reviewer gate for `WS-IB`
