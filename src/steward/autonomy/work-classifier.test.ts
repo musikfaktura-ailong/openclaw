@@ -62,4 +62,57 @@ describe("WS-IC work classifier", () => {
       reason: "audit_missing",
     });
   });
+
+  it("classifies diagnostic work after consecutive failed primary tasks", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-frustration", 1_000);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_proofs (
+         task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+         verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+       ) VALUES (NULL, ?, NULL, 'general', 'proof', 'accepted', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)` ,
+    ).run(authority.sessionId, 1_050, 1_050);
+    db.prepare(
+      `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+       VALUES (?, ?, NULL, 'mission.audit.report', 'audit', '{}')` ,
+    ).run(1_060, authority.sessionId);
+    for (let index = 0; index < 2; index += 1) {
+      db.prepare(
+        `INSERT INTO steward_flows (
+           session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, 'research', 'completed', '{}', ?, ?, ?, ?)` ,
+      ).run(authority.sessionId, process.pid, 1_100 + index, 1_100 + index, 1_100 + index);
+      const flowId = Number((db.prepare(`SELECT id FROM steward_flows ORDER BY id DESC LIMIT 1`).get() as { id: number }).id);
+      db.prepare(
+        `INSERT INTO steward_flow_tasks (
+           flow_id, task_id, role, link_status, created_ts, updated_ts
+         ) VALUES (?, ?, 'primary', 'failed', ?, ?)` ,
+      ).run(flowId, flowId, 1_100 + index, 1_100 + index);
+    }
+
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+      workClass: "diagnostic_work",
+      reason: "consecutive_primary_failures",
+    });
+  });
+
+  it("falls through to maintenance work when no higher-priority condition is active", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-maintenance", 1_000);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_proofs (
+         task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+         verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+       ) VALUES (NULL, ?, NULL, 'general', 'proof', 'accepted', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)` ,
+    ).run(authority.sessionId, 1_050, 1_050);
+    db.prepare(
+      `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+       VALUES (?, ?, NULL, 'mission.audit.report', 'audit', '{}')` ,
+    ).run(1_060, authority.sessionId);
+
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+      workClass: "maintenance_work",
+      reason: "baseline_maintenance_window",
+    });
+  });
 });

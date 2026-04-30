@@ -7,6 +7,11 @@ export const RELATIONSHIP_MEMORY_TYPES = [
   "household_routine",
   "stewardship_ledger",
   "operator_override",
+  "steward_rule",
+  "steward_preference",
+  "steward_fact",
+  "steward_pattern",
+  "steward_procedure",
 ] as const;
 
 export type RelationshipMemoryType = (typeof RELATIONSHIP_MEMORY_TYPES)[number];
@@ -22,6 +27,11 @@ export const MEMORY_TYPE_WEIGHTS: Record<RelationshipMemoryType, number> = {
   household_routine: 0.75,
   stewardship_ledger: 0.7,
   operator_override: 0.6,
+  steward_rule: 0.9,
+  steward_preference: 0.8,
+  steward_fact: 0.75,
+  steward_pattern: 0.8,
+  steward_procedure: 0.8,
 };
 
 export function isRelationshipMemoryType(value: string): value is RelationshipMemoryType {

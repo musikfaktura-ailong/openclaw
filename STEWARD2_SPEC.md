@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IC merged via PR #18 (2026-04-30). Next slice: WS-JA daily self-review job. Carry-forwards open: CF-IC-1, CF-IC-2, CF-IC-3.**
+Current phase: **WS-JA implemented (2026-04-30). Ready for reviewer gate. Carry-forwards open: CF-IC-1, CF-IC-2.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4768,7 +4768,77 @@ Autonomy tranche state after merge:
 Carry-forwards still open:
 - `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
 - `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
-- `CF-IC-3` — add coverage for `consecutive_primary_failures` and `maintenance_work` classifier branches before `WS-JA` / `WS-JB` / `WS-JC` advancement gates if those slices rely on classifier routing
+- `CF-IC-3` — resolved on branch `ws-ja` by explicit `work-classifier.test.ts` coverage for `consecutive_primary_failures` and `maintenance_work`
 
 Next process step:
 - `STEWARD2 IMPLEMENT WS-JA`
+
+## WS-JA implementation gate (2026-04-30)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\OLD_AI\jobs\daily_self_review.py`
+
+Files added:
+- `src/steward/jobs/job-types.ts`
+- `src/steward/jobs/daily-self-review.ts`
+- `src/steward/jobs/daily-self-review.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/memory/memory-types.ts`
+- `src/steward/autonomy/work-classifier.test.ts`
+
+Host-owned invariant delivered in this slice:
+- the daily self-review job is now a steward-owned recurring job module, not a prompt-only note
+- one self-review record per UTC day is enforced by DB dedupe against prior `daily_self_review` job flows
+- explicit memory candidate lines are parsed deterministically and promoted into typed steward memory writes
+- no auto-code-modification behavior exists in this slice
+
+Behavior implemented:
+- `daily-self-review.ts`
+  - builds a bounded 24h snapshot from steward DB state:
+    - event count
+    - accepted/rejected proof counts
+    - failed primary task count
+    - open flow count
+  - builds a deterministic future-job prompt contract with explicit output format
+  - records one maintenance flow/task per day for `daily_self_review`
+  - persists job evidence through:
+    - `job.daily_self_review.recorded`
+    - `job.daily_self_review.reused`
+    - `job.daily_self_review.memory_extracted`
+  - extracts only explicit prefixed candidate lines:
+    - `RULE`
+    - `PREF`
+    - `FACT`
+    - `PATTERN[risk=...]`
+    - `PROC[risk=...]`
+- new typed memory categories added for self-review promotion:
+  - `steward_rule`
+  - `steward_preference`
+  - `steward_fact`
+  - `steward_pattern`
+  - `steward_procedure`
+- `CF-IC-3` resolved:
+  - classifier tests now cover both `consecutive_primary_failures` and `maintenance_work`
+
+Focused acceptance evidence:
+- first run creates one completed maintenance flow with `job_type = "daily_self_review"`
+- same-day rerun reuses the existing flow and emits `job.daily_self_review.reused`
+- explicit candidate lines create typed `steward_memories` rows through the existing relationship-memory storage seam
+- invalid, duplicate, or oversized lines are ignored deterministically
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/work-classifier.test.ts src/steward/jobs/daily-self-review.test.ts src/steward/memory/relationship-memory.test.ts`
+  - PASS: `3` files, `10` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `WS-JA`
+
+Next process step:
+- reviewer gate for `WS-JA`
