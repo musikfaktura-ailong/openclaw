@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IC reviewer gate PASS (2026-04-30). Ready for ADVANCE. Open PRs: lm-a → main (#15), ws-ia → main (#16), ws-ib → main (#17).**
+Current phase: **WS-IC merged via PR #18 (2026-04-30). Next slice: WS-JA daily self-review job. Carry-forwards open: CF-IC-1, CF-IC-2, CF-IC-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -2296,8 +2296,8 @@ Verdict: **PASS.** Workstream D implementation and Codex verification are comple
 
 ## Current tasks
 
-Current phase at that time: **P-1b merged via PR #14. Tranche-close reconciliation complete; ready for deployment testing (2026-04-29).**  
-Superseded by the 2026-04-29 autonomy-control mapping decision below.
+Current phase at that time: **WS-IC merged via PR #18. Next slice selected: WS-JA daily self-review job (2026-04-30).**  
+Supersedes the old pre-autonomy “ready for deployment testing” state.
 
 Immediate next tasks:
 1. ~~Claude: review WS-H~~ ✓ done 2026-04-25 — PASS on code, blocked on H-1 (uncommitted files)
@@ -4746,3 +4746,29 @@ Carry-forwards added:
 
 Next process step:
 - `STEWARD2 ADVANCE WS-IC`
+
+## WS-IC post-merge status (2026-04-30)
+
+Merge confirmed: PR `#18` merged `ws-ic` → `main`.
+
+WS-IC is now complete on `main`:
+- `src/steward/autonomy/autonomy-state.ts`
+- `src/steward/autonomy/autonomy-policy.ts`
+- `src/steward/autonomy/boot-sequence.ts`
+- `src/steward/autonomy/autonomy-runner.ts`
+- `src/steward/autonomy/idle-seeding.ts`
+- `src/steward/autonomy/work-classifier.ts`
+
+Autonomy tranche state after merge:
+- `WS-IA` merged
+- `WS-IB` merged
+- `WS-IC` merged
+- next implementation slice: `WS-JA`
+
+Carry-forwards still open:
+- `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
+- `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
+- `CF-IC-3` — add coverage for `consecutive_primary_failures` and `maintenance_work` classifier branches before `WS-JA` / `WS-JB` / `WS-JC` advancement gates if those slices rely on classifier routing
+
+Next process step:
+- `STEWARD2 IMPLEMENT WS-JA`
