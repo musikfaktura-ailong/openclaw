@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IC implemented (2026-04-30). Ready for reviewer gate. Open PRs: lm-a → main (#15), ws-ia → main (#16), ws-ib → main (#17).**
+Current phase: **WS-IC reviewer gate PASS (2026-04-30). Ready for ADVANCE. Open PRs: lm-a → main (#15), ws-ia → main (#16), ws-ib → main (#17).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4723,5 +4723,26 @@ Carry-forward:
     - recurring jobs (`daily self-review`, `sleep consolidation`, `strategy_validation`) belong to `WS-JA` / `WS-JB` / `WS-JC`
     - `WS-K` will own the steward timer seam that calls the autonomy runner on cadence
 
+## WS-IC reviewer gate (2026-04-30)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+Findings:
+
+1. All three outcomes (blocked / noop / seeded) are implemented and persisted correctly. Blocked emits `autonomy.tick.blocked` via policy gate. Noop emits `autonomy.tick.noop` with backoff advance. Seeded writes `steward_flows` + `steward_flow_tasks` and emits `autonomy.task.seeded`.
+2. One-task-per-tick is structurally enforced — runner calls `seedIdleAutonomyTask` once and returns. No loop possible.
+3. Duplicate suppression scans live flows for matching `seeded_by=autonomy` + `autonomy_work_class`. Correct.
+4. Backoff doubles on noop (60s → 900s cap), resets to 60s on seeded. Both KV writes confirmed by test.
+5. Work classification is deterministic with fixed priority order: active blockers → no proof → ≥2 consecutive primary failures → stale/missing audit → maintenance.
+6. 17/17 tests pass (5 test files).
+
+Carry-forwards added:
+
+- `CF-IC-1` — `taskId = flowId` in `idle-seeding.ts:124` is a synthetic alias. `steward_flow_tasks.task_id` has no FK so it is valid, but must resolve to a real host-owned task reference when WS-K wires the steward timer. Document or fix before WS-K advancement gate.
+- `CF-IC-2` — Double event on seeded path: `idle-seeding.ts` emits `autonomy.task.seeded`; `autonomy-runner.ts` also emits `flow.created` for the same action. `flow.created` is undocumented. Remove one or document both before WS-K.
+- `CF-IC-3` — `consecutive_primary_failures` and `maintenance_work` classifier branches have no test coverage. Add before WS-JA/JB/JC advancement gates if those slices depend on classifier routing.
+
 Next process step:
-- reviewer gate for `WS-IC`
+- `STEWARD2 ADVANCE WS-IC`
