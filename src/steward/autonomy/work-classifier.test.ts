@@ -1,0 +1,65 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { closeStewardDb, getDb, initStewardDb, resetDbForTest } from "../db/db-bootstrap.js";
+import { classifyAutonomyWork } from "./work-classifier.js";
+import { getOrCreateStewardSession } from "../runtime/session-authority.js";
+
+describe("WS-IC work classifier", () => {
+  beforeEach(() => {
+    initStewardDb(":memory:");
+  });
+
+  afterEach(() => {
+    closeStewardDb();
+    resetDbForTest();
+  });
+
+  it("classifies goal work when the session has no proof yet", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-goal", 1_000);
+
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+      workClass: "goal_work",
+      reason: "no_recorded_proof_yet",
+    });
+  });
+
+  it("classifies diagnostic work when an active blocker exists", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-diagnostic", 1_000);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_flows (
+         session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+       ) VALUES (?, 'control', 'blocked_deterministic', '{}', ?, ?, ?, ?)` ,
+    ).run(authority.sessionId, process.pid, 1_000, 1_000, 1_000);
+    const flowId = Number((db.prepare(`SELECT id FROM steward_flows ORDER BY id DESC LIMIT 1`).get() as { id: number }).id);
+    db.prepare(
+      `INSERT INTO steward_blockers (
+         flow_id, task_id, blocker_type, status, retry_count, data_json, created_ts, updated_ts
+       ) VALUES (?, ?, 'operator_required', 'active', 0, '{}', ?, ?)` ,
+    ).run(flowId, flowId, 1_100, 1_100);
+
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+      workClass: "diagnostic_work",
+      reason: "active_blockers_present",
+    });
+  });
+
+  it("classifies review work when proofs exist but no audit report has been recorded", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-review", 1_000);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_proofs (
+         task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+         verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+       ) VALUES (NULL, ?, NULL, 'general', 'proof', 'claim', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)` ,
+    ).run(authority.sessionId, 1_100, 1_100);
+    db.prepare(
+      `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+       VALUES (?, ?, NULL, 'runtime.idle', 'idle', '{}')` ,
+    ).run(1_200, authority.sessionId);
+
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+      workClass: "review_or_consolidation",
+      reason: "audit_missing",
+    });
+  });
+});

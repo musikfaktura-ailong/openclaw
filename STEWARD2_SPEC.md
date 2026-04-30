@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IB reviewer gate PASS (2026-04-30). Open PR ws-ib → main. Then WS-IC. PRs open: lm-a → main (#15), ws-ia → main (#16).**
+Current phase: **WS-IC implemented (2026-04-30). Ready for reviewer gate. Open PRs: lm-a → main (#15), ws-ia → main (#16), ws-ib → main (#17).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4636,3 +4636,92 @@ Carry-forward for WS-K scope:
 - `truthCoreReady` and `lmStudioLifecycleReady` default to `true` — acceptable for WS-IB. Once LM-C and truth-audit are wired at startup, these should be populated from real subsystem readiness checks rather than caller-supplied defaults.
 
 Verdict: **PASS. ADVANCE** — open PR `ws-ib → main`.
+
+## WS-IC implementation gate (2026-04-30)
+
+Implementer: Codex
+
+Files added:
+- `src/steward/autonomy/autonomy-runner.ts`
+- `src/steward/autonomy/idle-seeding.ts`
+- `src/steward/autonomy/work-classifier.ts`
+- `src/steward/autonomy/autonomy-runner.test.ts`
+- `src/steward/autonomy/work-classifier.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+
+Host-owned invariant delivered in this slice:
+- when autonomy is enabled, boot is complete, and no user turn is active, the host can call one deterministic autonomy tick that results in exactly one of:
+  - blocked with persisted reason
+  - no-op with persisted reason and cooldown/backoff
+  - exactly one seeded autonomous task through steward DB flow/task rows
+- the autonomy tick does not mark work completed or bypass consequence/proof/mission ownership
+- duplicate autonomous work for the same class is suppressed instead of fanning out
+
+Behavior implemented:
+- `autonomy-runner.ts`
+  - calls `evaluateAutonomyRunPolicy()` first
+  - persists `autonomy.tick.blocked` for blocked outcomes
+  - classifies eligible work deterministically
+  - seeds at most one task
+  - persists `autonomy.tick.noop` for duplicate suppression / no-new-task outcomes
+  - updates cooldown / next-allowed tick and autonomy backoff in steward KV
+- `work-classifier.ts`
+  - returns one of:
+    - `goal_work`
+    - `diagnostic_work`
+    - `maintenance_work`
+    - `review_or_consolidation`
+  - deterministic rules in this slice:
+    - active blockers => `diagnostic_work`
+    - no recorded proof yet => `goal_work`
+    - two recent primary failures => `diagnostic_work`
+    - proofs exist but audit missing/stale => `review_or_consolidation`
+    - otherwise => `maintenance_work`
+- `idle-seeding.ts`
+  - seeds one `steward_flows` row plus one `steward_flow_tasks` row
+  - writes autonomy-owned state JSON:
+    - `seeded_by = "autonomy"`
+    - `autonomy_work_class`
+    - `classification_reason`
+  - maps work class to steward-owned flow/task authority:
+    - `goal_work` => `research` / `primary`
+    - `diagnostic_work` => `control` / `diagnostic`
+    - `maintenance_work` => `maintenance` / `diagnostic`
+    - `review_or_consolidation` => `maintenance` / `diagnostic`
+  - suppresses duplicate live autonomy work for the same class
+- typed evidence added:
+  - `autonomy.tick.blocked`
+  - `autonomy.tick.noop`
+  - `autonomy.task.seeded`
+
+Focused acceptance evidence:
+- blocked case:
+  - if runtime is `running`, autonomy tick returns `blocked`
+  - persisted event: `autonomy.tick.blocked`
+- seeded case:
+  - eligible autonomy tick seeds exactly one `research` flow / `primary` task when no proof exists
+  - persisted event: `autonomy.task.seeded`
+  - persisted flow state proves `seeded_by = "autonomy"`
+- duplicate suppression / backoff:
+  - if a matching live autonomy flow already exists, autonomy tick returns `noop`
+  - persisted event: `autonomy.tick.noop`
+  - `autonomy.next_allowed_tick_ts` advances and backoff is stored in steward KV
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/work-classifier.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/autonomy/autonomy-state.test.ts src/steward/autonomy/autonomy-policy.test.ts src/steward/autonomy/boot-sequence.test.ts`
+  - PASS: `5` files, `17` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- `CF-AUTO-1`
+  - `WS-IC` currently seeds deterministic bounded work classes, but it does not yet dispatch named recurring jobs.
+  - This is intentional and matches the resolved scheduler split:
+    - recurring jobs (`daily self-review`, `sleep consolidation`, `strategy_validation`) belong to `WS-JA` / `WS-JB` / `WS-JC`
+    - `WS-K` will own the steward timer seam that calls the autonomy runner on cadence
+
+Next process step:
+- reviewer gate for `WS-IC`
