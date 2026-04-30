@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IB implementation complete on `ws-ib`; ready for reviewer gate. Open PRs: lm-a → main (#15), ws-ia → main (#16). (2026-04-30).**
+Current phase: **WS-IB reviewer gate PASS (2026-04-30). Open PR ws-ib → main. Then WS-IC. PRs open: lm-a → main (#15), ws-ia → main (#16).**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4616,3 +4616,23 @@ Verification:
 
 Next process step:
 - reviewer gate for `WS-IB`
+
+### WS-IB reviewer gate (2026-04-30)
+
+Reviewer: Claude Code
+
+Tightened advancement gate applied — all four criteria checked from DB evidence:
+
+1. **What was observed at boot?** — `BootCapabilitySnapshot` in `steward_events.data_json`: `dbReady`, `runtimeStatus` (real DB read via `getRuntimeState()`), `autonomyMode` (from `steward_kv`), `truthCoreReady`, `lmStudioLifecycleReady`. Test 1 parses and asserts on `data_json` by SQL. ✓
+2. **Classified next action class?** — `classifyNextAction` produces 4 deterministic outcomes from observable DB state, no model input. Persisted in `data_json`. ✓
+3. **One-time event / idempotency?** — `bootCompleted` flag in `steward_kv`; second call emits `autonomy.boot.skipped`. Test 2 counts both event kinds by SQL — exactly 1 recorded, 1 skipped. ✓
+4. **Queryable from DB?** — `steward_events` table, `kind = 'autonomy.boot.recorded'`, `data_json` parseable. Test 1 does exactly this. ✓
+
+Evidence:
+- tests: `corepack pnpm exec vitest run src/steward/autonomy/boot-sequence.test.ts` — 1 file, 3 tests, PASS
+- TypeScript: `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit` — clean
+
+Carry-forward for WS-K scope:
+- `truthCoreReady` and `lmStudioLifecycleReady` default to `true` — acceptable for WS-IB. Once LM-C and truth-audit are wired at startup, these should be populated from real subsystem readiness checks rather than caller-supplied defaults.
+
+Verdict: **PASS. ADVANCE** — open PR `ws-ib → main`.
