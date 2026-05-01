@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { HeartbeatRunner } from "../infra/heartbeat-runner.js";
+import type { AutonomyBridgeRunner } from "../steward/autonomy/autonomy-bridge.js";
 import type { ChannelHealthMonitor } from "./channel-health-monitor.js";
 
 export type GatewayConfigReloaderHandle = {
@@ -13,6 +14,7 @@ export type GatewayServerMutableState = {
   dedupeCleanup: ReturnType<typeof setInterval>;
   mediaCleanup: ReturnType<typeof setInterval> | null;
   heartbeatRunner: HeartbeatRunner;
+  autonomyBridge: AutonomyBridgeRunner;
   stopGatewayUpdateCheck: () => void;
   tailscaleCleanup: (() => Promise<void>) | null;
   skillsRefreshTimer: ReturnType<typeof setTimeout> | null;
@@ -44,6 +46,10 @@ export function createGatewayServerMutableState(): GatewayServerMutableState {
       stop: () => {},
       updateConfig: (_cfg: OpenClawConfig) => {},
     } satisfies HeartbeatRunner,
+    autonomyBridge: {
+      stop: () => {},
+      updateConfig: (_cfg: OpenClawConfig) => {},
+    } satisfies AutonomyBridgeRunner,
     stopGatewayUpdateCheck: () => {},
     tailscaleCleanup: null as (() => Promise<void>) | null,
     skillsRefreshTimer: null as ReturnType<typeof setTimeout> | null,

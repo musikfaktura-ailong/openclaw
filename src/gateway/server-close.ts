@@ -5,6 +5,7 @@ import type { CanvasHostHandler, CanvasHostServer } from "../canvas-host/server.
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
 import { stopGmailWatcher } from "../hooks/gmail-watcher.js";
 import type { HeartbeatRunner } from "../infra/heartbeat-runner.js";
+import type { AutonomyBridgeRunner } from "../steward/autonomy/autonomy-bridge.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import type { PluginServicesHandle } from "../plugins/services.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -74,6 +75,7 @@ export function createGatewayCloseHandler(params: {
   pluginServices: PluginServicesHandle | null;
   cron: { stop: () => void };
   heartbeatRunner: HeartbeatRunner;
+  autonomyBridge: AutonomyBridgeRunner;
   updateCheckStop?: (() => void) | null;
   stopTaskRegistryMaintenance?: (() => void) | null;
   nodePresenceTimers: Map<string, ReturnType<typeof setInterval>>;
@@ -135,6 +137,7 @@ export function createGatewayCloseHandler(params: {
       await stopGmailWatcher();
       params.cron.stop();
       params.heartbeatRunner.stop();
+      params.autonomyBridge.stop();
       try {
         params.stopTaskRegistryMaintenance?.();
       } catch {

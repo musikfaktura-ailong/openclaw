@@ -29,9 +29,12 @@ export type StewardEventKind =
   | "autonomy.mode.updated"
   | "autonomy.policy.allowed"
   | "autonomy.policy.blocked"
+  | "autonomy.bridge.tick"
+  | "autonomy.bridge.failed"
   | "autonomy.tick.blocked"
   | "autonomy.tick.noop"
   | "autonomy.task.seeded"
+  | "autonomy.triage.recorded"
   | "job.daily_self_review.recorded"
   | "job.daily_self_review.reused"
   | "job.daily_self_review.memory_extracted"
@@ -128,4 +131,20 @@ export type StewardEventRow = {
   kind: string;
   message: string;
   dataJson: string;
+};
+
+export type StewardHostTaskStatus = "pending" | "claimed" | "completed" | "cancelled";
+
+export type StewardHostTaskRow = {
+  id: number;
+  sessionId: string;
+  source: string;
+  status: StewardHostTaskStatus;
+  workClass: string;
+  title: string;
+  details: string;
+  triageArtifactPath: string | null;
+  triageKnowledgeId: number | null;
+  createdTs: number;
+  updatedTs: number;
 };

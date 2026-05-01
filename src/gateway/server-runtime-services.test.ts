@@ -5,9 +5,15 @@ const hoisted = vi.hoisted(() => {
     stop: vi.fn(),
     updateConfig: vi.fn(),
   };
+  const autonomyBridge = {
+    stop: vi.fn(),
+    updateConfig: vi.fn(),
+  };
   return {
     heartbeatRunner,
+    autonomyBridge,
     startHeartbeatRunner: vi.fn(() => heartbeatRunner),
+    startStewardAutonomyBridge: vi.fn(() => autonomyBridge),
     startChannelHealthMonitor: vi.fn(() => ({ stop: vi.fn() })),
     startGatewayModelPricingRefresh: vi.fn(() => vi.fn()),
     recoverPendingDeliveries: vi.fn(async () => undefined),
@@ -17,6 +23,10 @@ const hoisted = vi.hoisted(() => {
 
 vi.mock("../infra/heartbeat-runner.js", () => ({
   startHeartbeatRunner: hoisted.startHeartbeatRunner,
+}));
+
+vi.mock("../steward/autonomy/autonomy-bridge.js", () => ({
+  startStewardAutonomyBridge: hoisted.startStewardAutonomyBridge,
 }));
 
 vi.mock("../infra/outbound/deliver.js", () => ({
@@ -43,7 +53,10 @@ describe("server-runtime-services", () => {
     vi.useRealTimers();
     hoisted.heartbeatRunner.stop.mockClear();
     hoisted.heartbeatRunner.updateConfig.mockClear();
+    hoisted.autonomyBridge.stop.mockClear();
+    hoisted.autonomyBridge.updateConfig.mockClear();
     hoisted.startHeartbeatRunner.mockClear();
+    hoisted.startStewardAutonomyBridge.mockClear();
     hoisted.startChannelHealthMonitor.mockClear();
     hoisted.startGatewayModelPricingRefresh.mockClear();
     hoisted.recoverPendingDeliveries.mockClear();
@@ -64,10 +77,13 @@ describe("server-runtime-services", () => {
 
     expect(hoisted.startChannelHealthMonitor).toHaveBeenCalledTimes(1);
     expect(hoisted.startHeartbeatRunner).not.toHaveBeenCalled();
+    expect(hoisted.startStewardAutonomyBridge).not.toHaveBeenCalled();
     expect(hoisted.recoverPendingDeliveries).not.toHaveBeenCalled();
 
     services.heartbeatRunner.stop();
     expect(hoisted.heartbeatRunner.stop).not.toHaveBeenCalled();
+    services.autonomyBridge.stop();
+    expect(hoisted.autonomyBridge.stop).not.toHaveBeenCalled();
   });
 
   it("activates heartbeat, cron, and delivery recovery after sidecars are ready", async () => {
@@ -83,8 +99,10 @@ describe("server-runtime-services", () => {
     });
 
     expect(hoisted.startHeartbeatRunner).toHaveBeenCalledTimes(1);
+    expect(hoisted.startStewardAutonomyBridge).toHaveBeenCalledTimes(1);
     expect(cron.start).toHaveBeenCalledTimes(1);
     expect(services.heartbeatRunner).toBe(hoisted.heartbeatRunner);
+    expect(services.autonomyBridge).toBe(hoisted.autonomyBridge);
     await vi.dynamicImportSettled();
     expect(hoisted.recoverPendingDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -106,11 +124,14 @@ describe("server-runtime-services", () => {
     });
 
     expect(hoisted.startHeartbeatRunner).not.toHaveBeenCalled();
+    expect(hoisted.startStewardAutonomyBridge).not.toHaveBeenCalled();
     expect(cron.start).not.toHaveBeenCalled();
     expect(hoisted.recoverPendingDeliveries).not.toHaveBeenCalled();
 
     services.heartbeatRunner.stop();
     expect(hoisted.heartbeatRunner.stop).not.toHaveBeenCalled();
+    services.autonomyBridge.stop();
+    expect(hoisted.autonomyBridge.stop).not.toHaveBeenCalled();
   });
 });
 

@@ -47,10 +47,11 @@ function nextBackoffDelay(currentBackoffMs: number): number {
   return Math.min(currentBackoffMs * 2, MAX_IDLE_BACKOFF_MS);
 }
 
-export function runAutonomyTick(params: {
+export async function runAutonomyTick(params: {
   sessionKey: string;
+  artifactRoot?: string;
   now?: number;
-}): AutonomyTickOutcome {
+}): Promise<AutonomyTickOutcome> {
   const now = params.now ?? Date.now();
   const decision = evaluateAutonomyRunPolicy({
     sessionKey: params.sessionKey,
@@ -84,10 +85,12 @@ export function runAutonomyTick(params: {
     sessionId: decision.sessionId,
     now,
   });
-  const seeded = seedIdleAutonomyTask({
+  const seeded = await seedIdleAutonomyTask({
     sessionId: decision.sessionId,
+    sessionKey: params.sessionKey,
     workClass: classification.workClass,
     classificationReason: classification.reason,
+    artifactRoot: params.artifactRoot,
     now,
   });
 
@@ -135,19 +138,6 @@ export function runAutonomyTick(params: {
   markAutonomyTickRan({
     now,
     nextAllowedTickTs,
-  });
-  appendStewardEvent({
-    kind: "flow.created",
-    message: "autonomy flow created",
-    sessionId: decision.sessionId,
-    flowId: seeded.task.flowId,
-    now,
-    data: {
-      taskId: seeded.task.taskId,
-      workClass: seeded.workClass,
-      reason: seeded.reason,
-      seededBy: "autonomy",
-    },
   });
   return {
     status: "seeded",
