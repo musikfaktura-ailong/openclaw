@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-K reviewer findings resolved on branch `ws-k` (2026-05-01). Ready for ADVANCE. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-K merged via PR `#22` (2026-05-01). Autonomy tranche closed. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet merged/wired through LM-C.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5380,3 +5380,62 @@ Additional verification after the fixes:
 
 Result:
 - `WS-K` is now advance-ready with no open `WS-K` carry-forwards
+
+## WS-K post-merge status and autonomy tranche close (2026-05-01)
+
+Merge confirmed: PR `#22` merged `ws-k` → `main`.
+
+WS-K is now complete on `main`:
+- `src/steward/db/migrations/0004_autonomy_tasks.sql`
+- `src/steward/autonomy/goal-orchestrator.ts`
+- `src/steward/autonomy/triage-artifacts.ts`
+- `src/steward/autonomy/autonomy-bridge.ts`
+- `src/steward/autonomy/goal-orchestrator.test.ts`
+- `src/steward/autonomy/triage-artifacts.test.ts`
+- `src/steward/autonomy/autonomy-bridge.test.ts`
+- associated seam updates in:
+  - `src/steward/autonomy/idle-seeding.ts`
+  - `src/steward/autonomy/autonomy-runner.ts`
+  - `src/gateway/server-runtime-services.ts`
+  - `src/gateway/server-runtime-handles.ts`
+  - `src/gateway/server-reload-handlers.ts`
+  - `src/gateway/server-close.ts`
+  - `src/gateway/server.impl.ts`
+
+Autonomy tranche state after WS-K merge:
+- `WS-IA` merged
+- `WS-IB` merged
+- `WS-IC` merged
+- `WS-JA` merged
+- `WS-JB` merged
+- `WS-JC` merged
+- `WS-K` merged
+
+Decision:
+- autonomy tranche is **closed**
+- autonomy tranche is **not** the remaining blocker for deployment testing
+
+Deployment-readiness decision:
+- **NO, Steward2 is not yet deployment-ready for real steward evaluation**
+
+Why deployment-readiness is still blocked:
+- LM Studio lifecycle tranche is not complete on `main`
+  - `LM-A` exists on branch `lm-a` and is review-passed, but is not merged
+  - `LM-B`, `LM-C`, and `LM-D` are not yet implemented/merged
+- `WS-IB` / `WS-K` startup readiness still treats:
+  - `truthCoreReady`
+  - `lmStudioLifecycleReady`
+  as caller-defaulted `true` values
+- the spec already marked LM lifecycle ownership as a prerequisite before deployment testing resumes
+
+Non-blocking carry-forwards that remain outside deployment readiness:
+- `CF-JB-1`
+- `CF-JB-2`
+- `CF-JB-3`
+
+Conclusion:
+- autonomous steward behavior is now structurally present on `main`
+- deployment testing is still paused pending LM lifecycle completion and real startup readiness wiring
+
+Next process step:
+- `STEWARD2 ADVANCE LM-A`
