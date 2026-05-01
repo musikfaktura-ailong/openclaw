@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JB merged via PR #20 (2026-05-01). Next slice: WS-JC strategy validation job. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-JC implemented on branch `ws-jc` (2026-05-01). Awaiting reviewer gate. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5062,3 +5062,81 @@ Open carry-forwards:
 
 Next process step:
 - `STEWARD2 IMPLEMENT WS-JB`
+
+## WS-JC implementation gate (2026-05-01)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\PEQS\core\strategy_validator.py`
+
+Files added:
+- `src/steward/jobs/strategy-validation.ts`
+- `src/steward/jobs/strategy-validation.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/jobs/job-types.ts`
+
+Host-owned invariant delivered in this slice:
+- strategy validation is now a steward-owned recurring job, not a free-floating planner idea
+- validation reads only persisted Steward2 state:
+  - latest steward proof
+  - recent truth-memory signals
+  - latest task-value judgment
+  - prior validation outcomes for cooldown / burn escalation
+- each validation attempt persists one explicit approve/reject decision path in steward DB state
+- repeated failed validation attempts are bounded through the existing mission time-burn seam
+
+Behavior implemented:
+- `strategy-validation.ts`
+  - adds a 5-minute strategy-validation cadence aligned to the PEQS donor cooldown
+  - reuses the last validation decision during active cooldown and emits `job.strategy_validation.reused`
+  - builds a DB-native validation snapshot from:
+    - latest `steward_proofs` row
+    - accepted/rejected proof counts
+    - last 24h `truth_violation` / `truth_reinforced` memory counts
+    - latest `mission.task_value.adjudicated` event label
+  - applies deterministic validation rules:
+    - reject if no candidate proof exists
+    - reject if latest proof is not accepted
+    - reject if latest proof is not grounded
+    - reject if proof score is below threshold
+    - reject if recent truth violations remain open
+    - reject if latest task value is `low_value` or `hollow`
+    - approve only when those blockers are absent
+  - records one completed maintenance flow/task per validation attempt with:
+    - `job_type = "strategy_validation"`
+    - full validation snapshot
+    - decision object
+    - cooldown timestamp
+    - persisted knowledge reference
+    - budget adjustment evidence
+  - persists event evidence through:
+    - `job.strategy_validation.recorded`
+    - `job.strategy_validation.reused`
+    - `job.strategy_validation.approved`
+    - `job.strategy_validation.rejected`
+  - stores a searchable `shared_thread` knowledge record for each new validation decision
+  - uses existing mission budget seams:
+    - `applyValidationBonus(...)` on approval
+    - `applyRejectionBurn(...)` on rejection with escalating rejection count
+
+Focused acceptance evidence:
+- a strong grounded accepted proof produces an explicit approval record plus validation bonus
+- truth-blocked candidate state produces an explicit rejection record plus escalating burn on repeated attempts
+- rerun during cooldown reuses the existing decision and does not create a second flow
+- weak proof score rejects deterministically without depending on legacy PEQS tables or runtime files
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/jobs/strategy-validation.test.ts`
+  - PASS: `1` file, `4` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `WS-JC` implementation
+
+Next process step:
+- `STEWARD2 REVIEW WS-JC`
