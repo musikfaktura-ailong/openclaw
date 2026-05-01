@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-IC merged via PR #18 (2026-04-30). Next slice: WS-JA daily self-review job. Carry-forwards open: CF-IC-1, CF-IC-2, CF-IC-3.**
+Current phase: **WS-JA reviewer gate PASS with post-review fixes applied (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4768,7 +4768,117 @@ Autonomy tranche state after merge:
 Carry-forwards still open:
 - `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
 - `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
-- `CF-IC-3` — add coverage for `consecutive_primary_failures` and `maintenance_work` classifier branches before `WS-JA` / `WS-JB` / `WS-JC` advancement gates if those slices rely on classifier routing
+- `CF-IC-3` — resolved on branch `ws-ja` by explicit `work-classifier.test.ts` coverage for `consecutive_primary_failures` and `maintenance_work`
 
 Next process step:
 - `STEWARD2 IMPLEMENT WS-JA`
+
+## WS-JA implementation gate (2026-04-30)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\OLD_AI\jobs\daily_self_review.py`
+
+Files added:
+- `src/steward/jobs/job-types.ts`
+- `src/steward/jobs/daily-self-review.ts`
+- `src/steward/jobs/daily-self-review.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/memory/memory-types.ts`
+- `src/steward/autonomy/work-classifier.test.ts`
+
+Host-owned invariant delivered in this slice:
+- the daily self-review job is now a steward-owned recurring job module, not a prompt-only note
+- one self-review record per UTC day is enforced by DB dedupe against prior `daily_self_review` job flows
+- explicit memory candidate lines are parsed deterministically and promoted into typed steward memory writes
+- no auto-code-modification behavior exists in this slice
+
+Behavior implemented:
+- `daily-self-review.ts`
+  - builds a bounded 24h snapshot from steward DB state:
+    - event count
+    - accepted/rejected proof counts
+    - failed primary task count
+    - open flow count
+  - builds a deterministic future-job prompt contract with explicit output format
+  - records one maintenance flow/task per day for `daily_self_review`
+  - persists job evidence through:
+    - `job.daily_self_review.recorded`
+    - `job.daily_self_review.reused`
+    - `job.daily_self_review.memory_extracted`
+  - extracts only explicit prefixed candidate lines:
+    - `RULE`
+    - `PREF`
+    - `FACT`
+    - `PATTERN[risk=...]`
+    - `PROC[risk=...]`
+- new typed memory categories added for self-review promotion:
+  - `steward_rule`
+  - `steward_preference`
+  - `steward_fact`
+  - `steward_pattern`
+  - `steward_procedure`
+- `CF-IC-3` resolved:
+  - classifier tests now cover both `consecutive_primary_failures` and `maintenance_work`
+
+Focused acceptance evidence:
+- first run creates one completed maintenance flow with `job_type = "daily_self_review"`
+- same-day rerun reuses the existing flow and emits `job.daily_self_review.reused`
+- explicit candidate lines create typed `steward_memories` rows through the existing relationship-memory storage seam
+- invalid, duplicate, or oversized lines are ignored deterministically
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/work-classifier.test.ts src/steward/jobs/daily-self-review.test.ts src/steward/memory/relationship-memory.test.ts`
+  - PASS: `3` files, `10` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `WS-JA`
+
+## WS-JA reviewer gate (2026-05-01)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+Findings:
+
+1. Daily cadence/dedupe correct — UTC day string stored in `state_json`; `findExistingDailySelfReviewFlow` matches `job_type + day`; reuse emits `job.daily_self_review.reused` and returns without a new record. Snapshot window (rolling 24h) and dedupe (UTC day boundary) are independent and consistent.
+2. Persisted evidence complete — completed maintenance flow, succeeded diagnostic task, full `state_json` with snapshot/prompt/report/extracted-count, plus `job.daily_self_review.recorded` and `job.daily_self_review.memory_extracted` events.
+3. Memory extraction is explicit and bounded — prefix-only (RULE/PREF/FACT/PATTERN/PROC), ≤240 chars, dedupe by `candidateType:text`, routed into 5 typed `steward_memories` entries. No free-form or implicit extraction.
+4. No auto-code-modification — no fs access, no exec/eval/spawn. Prompt explicitly forbids code modification.
+5. CF-IC-3 resolved — `consecutive_primary_failures` and `maintenance_work` classifier branches now tested.
+6. 10/10 tests pass (3 test files).
+
+Carry-forwards added:
+
+- `CF-JA-1` — resolved on `ws-ja`: `job.daily_self_review.memory_extracted` now emits only when `candidates.length > 0`.
+- `CF-JA-2` — resolved on `ws-ja`: added day-boundary rollover test proving a new UTC day creates a new flow instead of reusing the prior day record.
+
+Next process step:
+- `STEWARD2 ADVANCE WS-JA`
+
+## WS-JA post-review fixes (2026-05-01)
+
+Codex applied the two reviewer carry-forward fixes before advancement:
+
+- `CF-JA-1` fixed in `src/steward/jobs/daily-self-review.ts`
+  - `job.daily_self_review.memory_extracted` is now gated on `candidates.length > 0`
+  - prevents misleading extraction events when no explicit memory candidates were present
+- `CF-JA-2` fixed in `src/steward/jobs/daily-self-review.test.ts`
+  - added UTC day-boundary rollover coverage
+  - proves a second run on the next UTC day creates a new review flow instead of reusing the prior day flow
+
+Additional verification after the fixes:
+- `corepack pnpm exec vitest run src/steward/jobs/daily-self-review.test.ts src/steward/memory/relationship-memory.test.ts src/steward/autonomy/work-classifier.test.ts`
+  - PASS: `3` files, `12` tests
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Result:
+- `WS-JA` is now advance-ready with no open `WS-JA` carry-forwards
