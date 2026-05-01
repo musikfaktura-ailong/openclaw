@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JA reviewer gate PASS with post-review fixes applied (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2.**
+Current phase: **WS-JA merged via PR #19 (2026-05-01). Next slice: WS-JB sleep consolidation job. Carry-forwards open: CF-IC-1, CF-IC-2.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4763,15 +4763,16 @@ Autonomy tranche state after merge:
 - `WS-IA` merged
 - `WS-IB` merged
 - `WS-IC` merged
-- next implementation slice: `WS-JA`
+- `WS-JA` merged
+- next implementation slice: `WS-JB`
 
 Carry-forwards still open:
 - `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
 - `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
-- `CF-IC-3` — resolved on branch `ws-ja` by explicit `work-classifier.test.ts` coverage for `consecutive_primary_failures` and `maintenance_work`
+- `CF-IC-3` — resolved in `WS-JA` by explicit `work-classifier.test.ts` coverage for `consecutive_primary_failures` and `maintenance_work`
 
 Next process step:
-- `STEWARD2 IMPLEMENT WS-JA`
+- `STEWARD2 IMPLEMENT WS-JB`
 
 ## WS-JA implementation gate (2026-04-30)
 
@@ -4882,3 +4883,26 @@ Additional verification after the fixes:
 
 Result:
 - `WS-JA` is now advance-ready with no open `WS-JA` carry-forwards
+
+## WS-JA post-merge status (2026-05-01)
+
+Merge confirmed: PR `#19` merged `ws-ja` → `main`.
+
+WS-JA is now complete on `main`:
+- `src/steward/jobs/job-types.ts`
+- `src/steward/jobs/daily-self-review.ts`
+- `src/steward/jobs/daily-self-review.test.ts`
+
+Autonomy tranche state after WS-JA merge:
+- `WS-IA` merged
+- `WS-IB` merged
+- `WS-IC` merged
+- `WS-JA` merged
+- next implementation slice: `WS-JB`
+
+Open carry-forwards:
+- `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
+- `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
+
+Next process step:
+- `STEWARD2 IMPLEMENT WS-JB`
