@@ -346,19 +346,21 @@ export async function runDailySelfReviewJob(params: {
       extractedCount: candidates.length,
     },
   });
-  appendStewardEvent({
-    kind: "job.daily_self_review.memory_extracted",
-    message: "daily self-review memory extracted",
-    sessionId: authority.sessionId,
-    flowId,
-    now,
-    data: {
-      day: snapshot.day,
-      taskId,
-      extractedCount: candidates.length,
-      memoryTypes: candidates.map((candidate) => candidate.memoryType),
-    },
-  });
+  if (candidates.length > 0) {
+    appendStewardEvent({
+      kind: "job.daily_self_review.memory_extracted",
+      message: "daily self-review memory extracted",
+      sessionId: authority.sessionId,
+      flowId,
+      now,
+      data: {
+        day: snapshot.day,
+        taskId,
+        extractedCount: candidates.length,
+        memoryTypes: candidates.map((candidate) => candidate.memoryType),
+      },
+    });
+  }
 
   return {
     created: true,

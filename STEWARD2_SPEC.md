@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JA implemented (2026-04-30). Ready for reviewer gate. Carry-forwards open: CF-IC-1, CF-IC-2.**
+Current phase: **WS-JA reviewer gate PASS with post-review fixes applied (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4840,5 +4840,45 @@ Verification:
 Carry-forward:
 - none added by `WS-JA`
 
+## WS-JA reviewer gate (2026-05-01)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+Findings:
+
+1. Daily cadence/dedupe correct — UTC day string stored in `state_json`; `findExistingDailySelfReviewFlow` matches `job_type + day`; reuse emits `job.daily_self_review.reused` and returns without a new record. Snapshot window (rolling 24h) and dedupe (UTC day boundary) are independent and consistent.
+2. Persisted evidence complete — completed maintenance flow, succeeded diagnostic task, full `state_json` with snapshot/prompt/report/extracted-count, plus `job.daily_self_review.recorded` and `job.daily_self_review.memory_extracted` events.
+3. Memory extraction is explicit and bounded — prefix-only (RULE/PREF/FACT/PATTERN/PROC), ≤240 chars, dedupe by `candidateType:text`, routed into 5 typed `steward_memories` entries. No free-form or implicit extraction.
+4. No auto-code-modification — no fs access, no exec/eval/spawn. Prompt explicitly forbids code modification.
+5. CF-IC-3 resolved — `consecutive_primary_failures` and `maintenance_work` classifier branches now tested.
+6. 10/10 tests pass (3 test files).
+
+Carry-forwards added:
+
+- `CF-JA-1` — resolved on `ws-ja`: `job.daily_self_review.memory_extracted` now emits only when `candidates.length > 0`.
+- `CF-JA-2` — resolved on `ws-ja`: added day-boundary rollover test proving a new UTC day creates a new flow instead of reusing the prior day record.
+
 Next process step:
-- reviewer gate for `WS-JA`
+- `STEWARD2 ADVANCE WS-JA`
+
+## WS-JA post-review fixes (2026-05-01)
+
+Codex applied the two reviewer carry-forward fixes before advancement:
+
+- `CF-JA-1` fixed in `src/steward/jobs/daily-self-review.ts`
+  - `job.daily_self_review.memory_extracted` is now gated on `candidates.length > 0`
+  - prevents misleading extraction events when no explicit memory candidates were present
+- `CF-JA-2` fixed in `src/steward/jobs/daily-self-review.test.ts`
+  - added UTC day-boundary rollover coverage
+  - proves a second run on the next UTC day creates a new review flow instead of reusing the prior day flow
+
+Additional verification after the fixes:
+- `corepack pnpm exec vitest run src/steward/jobs/daily-self-review.test.ts src/steward/memory/relationship-memory.test.ts src/steward/autonomy/work-classifier.test.ts`
+  - PASS: `3` files, `12` tests
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Result:
+- `WS-JA` is now advance-ready with no open `WS-JA` carry-forwards

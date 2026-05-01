@@ -101,6 +101,38 @@ describe("WS-JA daily self-review job", () => {
     expect(reusedEvent.data_json).toContain(`"flowId":${first.flowId}`);
   });
 
+  it("creates a new review flow after the UTC day boundary rolls over", async () => {
+    const sessionKey = "agent:main:webchat:direct:self-review-day-rollover";
+    const firstNow = Date.UTC(2026, 3, 30, 23, 59, 0);
+    const secondNow = Date.UTC(2026, 4, 1, 0, 1, 0);
+
+    const first = await runDailySelfReviewJob({
+      sessionKey,
+      now: firstNow,
+      embedder,
+      reportText: "RULE: Last review of the day",
+    });
+    const second = await runDailySelfReviewJob({
+      sessionKey,
+      now: secondNow,
+      embedder,
+      reportText: "RULE: First review of the next UTC day",
+    });
+    const flowCount = getDb()
+      .prepare(`SELECT COUNT(*) AS count FROM steward_flows`)
+      .get() as { count: number };
+    const reusedCount = getDb()
+      .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind = 'job.daily_self_review.reused'`)
+      .get() as { count: number };
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+    expect(second.reused).toBe(false);
+    expect(second.flowId).not.toBe(first.flowId);
+    expect(flowCount.count).toBe(2);
+    expect(reusedCount.count).toBe(0);
+  });
+
   it("builds a bounded 24h snapshot and prompt and ignores invalid extraction lines", () => {
     const sessionKey = "agent:main:webchat:direct:self-review-c";
     const authority = getOrCreateStewardSession(sessionKey, 1_000);
@@ -141,5 +173,22 @@ describe("WS-JA daily self-review job", () => {
       "steward_rule",
       "steward_procedure",
     ]);
+  });
+
+  it("does not emit memory_extracted when the report contains no explicit candidates", async () => {
+    const sessionKey = "agent:main:webchat:direct:self-review-no-candidates";
+
+    const result = await runDailySelfReviewJob({
+      sessionKey,
+      now: Date.UTC(2026, 4, 1, 10, 0, 0),
+      embedder,
+      reportText: "Concise report only\nSuggested next actions only",
+    });
+    const extractedCount = getDb()
+      .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind = 'job.daily_self_review.memory_extracted'`)
+      .get() as { count: number };
+
+    expect(result.extractedCount).toBe(0);
+    expect(extractedCount.count).toBe(0);
   });
 });
