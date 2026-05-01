@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JC reviewer findings resolved on branch `ws-jc` (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-JC merged via PR #21 (2026-05-01). Next slice: WS-K autonomous goal orchestration and host seam integration. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5192,3 +5192,32 @@ Additional verification after the fixes:
 
 Result:
 - `WS-JC` is now advance-ready with no open `WS-JC` carry-forwards
+
+## WS-JC post-merge status (2026-05-01)
+
+Merge confirmed: PR `#21` merged `ws-jc` → `main`.
+
+WS-JC is now complete on `main`:
+- `src/steward/jobs/strategy-validation.ts`
+- `src/steward/jobs/strategy-validation.test.ts`
+- `src/steward/jobs/job-types.ts`
+- `src/steward/db/runtime-schema.ts`
+
+Autonomy tranche state after WS-JC merge:
+- `WS-IA` merged
+- `WS-IB` merged
+- `WS-IC` merged
+- `WS-JA` merged
+- `WS-JB` merged
+- `WS-JC` merged
+- next implementation slice: `WS-K`
+
+Open carry-forwards:
+- `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
+- `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
+- `CF-JB-1` — consider gating sleep summary knowledge write if summary is structurally empty
+- `CF-JB-2` — consider explicit archive-write failure handling if future runtime policy forbids artifact writes
+- `CF-JB-3` — if/when sleep artifacts become operator-visible, add explicit retention policy text
+
+Next process step:
+- `STEWARD2 IMPLEMENT WS-K`
