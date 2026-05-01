@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-K merged via PR `#22` (2026-05-01). Autonomy tranche closed. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet merged/wired through LM-C.**
+Current phase: **LM-A reconciled as already contained in `main` (2026-05-01). LM tranche next step: `LM-B`. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5420,7 +5420,7 @@ Deployment-readiness decision:
 
 Why deployment-readiness is still blocked:
 - LM Studio lifecycle tranche is not complete on `main`
-  - `LM-A` exists on branch `lm-a` and is review-passed, but is not merged
+  - `LM-A` is already contained in `main` and does not require a separate merge
   - `LM-B`, `LM-C`, and `LM-D` are not yet implemented/merged
 - `WS-IB` / `WS-K` startup readiness still treats:
   - `truthCoreReady`
@@ -5438,4 +5438,25 @@ Conclusion:
 - deployment testing is still paused pending LM lifecycle completion and real startup readiness wiring
 
 Next process step:
-- `STEWARD2 ADVANCE LM-A`
+- `STEWARD2 IMPLEMENT LM-B`
+
+## LM-A post-advance reconciliation (2026-05-01)
+
+Advancement result:
+- no PR was opened for `lm-a`
+- Git confirmed `lm-a` is already an ancestor of `main`
+- therefore LM-A was already effectively present on `main` and required no additional merge step
+
+Evidence:
+- `git merge-base --is-ancestor lm-a main` returned success
+- `gh pr create --base main --head lm-a` failed with:
+  - `No commits between main and lm-a`
+
+Decision:
+- LM-A is reconciled as already advanced into `main`
+- the LM lifecycle tranche should proceed directly to `LM-B`
+
+Open LM carry-forwards after LM-A:
+- `CF-LM-3` — key normalization contract belongs to `LM-B`
+- `CF-LM-1` — query lock scope must be resolved before `LM-C`
+- `CF-LM-2` — cross-process lock scope must be resolved before `LM-C`
