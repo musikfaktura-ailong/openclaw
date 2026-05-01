@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JB merged via PR #20 (2026-05-01). Next slice: WS-JC strategy validation job. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-JC reviewer findings resolved on branch `ws-jc` (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5062,3 +5062,133 @@ Open carry-forwards:
 
 Next process step:
 - `STEWARD2 IMPLEMENT WS-JB`
+
+## WS-JC implementation gate (2026-05-01)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\PEQS\core\strategy_validator.py`
+
+Files added:
+- `src/steward/jobs/strategy-validation.ts`
+- `src/steward/jobs/strategy-validation.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/jobs/job-types.ts`
+
+Host-owned invariant delivered in this slice:
+- strategy validation is now a steward-owned recurring job, not a free-floating planner idea
+- validation reads only persisted Steward2 state:
+  - latest steward proof
+  - recent truth-memory signals
+  - latest task-value judgment
+  - prior validation outcomes for cooldown / burn escalation
+- each validation attempt persists one explicit approve/reject decision path in steward DB state
+- repeated failed validation attempts are bounded through the existing mission time-burn seam
+
+Behavior implemented:
+- `strategy-validation.ts`
+  - adds a 5-minute strategy-validation cadence aligned to the PEQS donor cooldown
+  - reuses the last validation decision during active cooldown and emits `job.strategy_validation.reused`
+  - builds a DB-native validation snapshot from:
+    - latest `steward_proofs` row
+    - accepted/rejected proof counts
+    - last 24h `truth_violation` / `truth_reinforced` memory counts
+    - latest `mission.task_value.adjudicated` event label
+  - applies deterministic validation rules:
+    - reject if no candidate proof exists
+    - reject if latest proof is not accepted
+    - reject if latest proof is not grounded
+    - reject if proof score is below threshold
+    - reject if recent truth violations remain open
+    - reject if latest task value is `low_value` or `hollow`
+    - approve only when those blockers are absent
+  - records one completed maintenance flow/task per validation attempt with:
+    - `job_type = "strategy_validation"`
+    - full validation snapshot
+    - decision object
+    - cooldown timestamp
+    - persisted knowledge reference
+    - budget adjustment evidence
+  - persists event evidence through:
+    - `job.strategy_validation.recorded`
+    - `job.strategy_validation.reused`
+    - `job.strategy_validation.approved`
+    - `job.strategy_validation.rejected`
+  - stores a searchable `shared_thread` knowledge record for each new validation decision
+  - uses existing mission budget seams:
+    - `applyValidationBonus(...)` on approval
+    - `applyRejectionBurn(...)` on rejection with escalating rejection count
+
+Focused acceptance evidence:
+- a strong grounded accepted proof produces an explicit approval record plus validation bonus
+- truth-blocked candidate state produces an explicit rejection record plus escalating burn on repeated attempts
+- rerun during cooldown reuses the existing decision and does not create a second flow
+- weak proof score rejects deterministically without depending on legacy PEQS tables or runtime files
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/jobs/strategy-validation.test.ts`
+  - PASS: `1` file, `4` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `WS-JC` implementation
+
+## WS-JC reviewer gate (2026-05-01)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+Findings:
+
+1. DB-native inputs confirmed — snapshot reads only from `steward_proofs`, `steward_memories`, and `steward_events`. No PEQS tables, no file reads, no external dependencies.
+2. Deterministic approve/reject ownership — `buildDecision()` is a strict 6-check priority chain. One code path to approval, six typed rejection reasons. No ambiguity.
+3. Cooldown reuse correct — `cooldown_until_ts` read from prior flow `state_json`; reuse emits `job.strategy_validation.reused` and does not create a new flow. Test proves `flowCount === 1` within cooldown.
+4. Rejection-burn escalation correct — consecutive rejection count counted from most-recent-first, stops at first approval. `rejectionCountBase = count + 1` → always ≥ 1. `applyRejectionBurn` uses exponential scale. Approval resets to 0, restarts cleanly on next rejection.
+5. Bonus/burn wired correctly — `applyValidationBonus` on approved, `applyRejectionBurn` on rejected. Both stored in `state_json` and knowledge metadata. Budget change confirmed by tests.
+6. Persisted evidence complete — `job.strategy_validation.recorded` + `approved`/`rejected` events, `shared_thread` knowledge entry with `strategy_validation_ref: true`. Decision, snapshot, cooldown, and budget adjustment all queryable.
+7. 4/4 tests pass.
+
+Carry-forwards added:
+
+- `CF-JC-1` — `validationKnowledgeId: 0` sentinel returned on reuse path instead of the actual knowledge ID from the prior flow's `state_json.validation_knowledge_id`. Non-blocking since `reused: true` signals the caller, but misleading.
+- `CF-JC-2` — `applyRejectionBurn`/`applyValidationBonus` called with `decision.flowId` / `decision.taskId` (proof IDs, possibly null) before the validation flow row is inserted. Audit trail links burn/bonus to the proof's flow, not the validation job's own flow. Minor audit-trail gap.
+- `CF-JC-3` — 4 of 7 rejection reason branches untested: `no_candidate_proof`, `proof_not_grounded`, `proof_not_accepted`, `recent_task_value_low`. Add before advancement gate.
+
+Next process step:
+- `STEWARD2 ADVANCE WS-JC`
+
+## WS-JC post-review fixes (2026-05-01)
+
+Codex resolved all three reviewer carry-forwards on `ws-jc` before advancement:
+
+- `CF-JC-1` fixed in `src/steward/jobs/strategy-validation.ts`
+  - reuse path now returns the real `validationKnowledgeId` from prior flow state
+  - `job.strategy_validation.reused` event now includes that same persisted ID
+- `CF-JC-2` fixed in `src/steward/jobs/strategy-validation.ts`
+  - validation flow/task is now created before bonus/burn is applied
+  - mission time audit events now bind to the validation job’s own `flowId` / `taskId`, not the proof’s flow
+- `CF-JC-3` fixed in `src/steward/jobs/strategy-validation.test.ts`
+  - added explicit coverage for the previously untested deterministic rejection paths:
+    - `no_candidate_proof`
+    - `proof_not_accepted`
+    - `proof_not_grounded`
+    - `recent_task_value_low`
+  - also added:
+    - reuse-path knowledge-ID coverage
+    - audit-trail flow ownership coverage
+
+Additional verification after the fixes:
+- `corepack pnpm exec vitest run src/steward/jobs/strategy-validation.test.ts`
+  - PASS: `1` file, `9` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Result:
+- `WS-JC` is now advance-ready with no open `WS-JC` carry-forwards
