@@ -62,7 +62,7 @@ describe("WS-JB sleep consolidation job", () => {
       expect(result.created).toBe(true);
       expect(summaryJson.day).toBe("2026-05-01");
       expect(summaryJson.eventCount).toBe(1);
-      expect(summaryJson.flowCount).toBeGreaterThanOrEqual(1);
+      expect(summaryJson.flowCount).toBe(1);
       expect(recordedEvent.data_json).toContain("\"summaryPath\"");
       expect(knowledge.metadata_json).toContain("\"sleep_summary_ref\":true");
     } finally {
@@ -142,23 +142,36 @@ describe("WS-JB sleep consolidation job", () => {
     }
   });
 
-  it("summarizes only the current UTC day window", () => {
+  it("summarizes only flow activity inside the current UTC day window", () => {
     const sessionKey = "agent:main:webchat:direct:sleep-window";
     const authority = getOrCreateStewardSession(sessionKey, 1_000);
     const now = Date.UTC(2026, 4, 1, 8, 0, 0);
     const dayStart = Date.UTC(2026, 4, 1, 0, 0, 0);
-    getDb()
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_flows (
+         session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+       ) VALUES (?, 'research', 'completed', '{}', ?, ?, ?, ?)` ,
+    ).run(authority.sessionId, process.pid, dayStart - 10_000, dayStart - 10_000, dayStart - 10_000);
+    const historicalFlowId = Number((db.prepare(`SELECT id FROM steward_flows ORDER BY id DESC LIMIT 1`).get() as { id: number }).id);
+    db.prepare(
+      `INSERT INTO steward_flows (
+         session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+       ) VALUES (?, 'maintenance', 'completed', '{}', ?, ?, ?, ?)` ,
+    ).run(authority.sessionId, process.pid, dayStart + 500, dayStart + 500, dayStart + 500);
+    const todaysFlowId = Number((db.prepare(`SELECT id FROM steward_flows ORDER BY id DESC LIMIT 1`).get() as { id: number }).id);
+    db
       .prepare(
         `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
-         VALUES (?, ?, NULL, 'runtime.idle', 'today', '{}')` ,
+         VALUES (?, ?, ?, 'runtime.idle', 'today', '{}')` ,
       )
-      .run(dayStart + 1000, authority.sessionId);
-    getDb()
+      .run(dayStart + 1000, authority.sessionId, todaysFlowId);
+    db
       .prepare(
         `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
-         VALUES (?, ?, NULL, 'runtime.idle', 'yesterday', '{}')` ,
+         VALUES (?, ?, ?, 'runtime.idle', 'yesterday', '{}')` ,
       )
-      .run(dayStart - 1000, authority.sessionId);
+      .run(dayStart - 1000, authority.sessionId, historicalFlowId);
 
     const summary = buildSleepConsolidationSummary({
       sessionId: authority.sessionId,
@@ -167,5 +180,7 @@ describe("WS-JB sleep consolidation job", () => {
 
     expect(summary.day).toBe("2026-05-01");
     expect(summary.eventCount).toBe(1);
+    expect(summary.flowCount).toBe(1);
+    expect(summary.flowSummaries.map((flow) => flow.flowId)).toEqual([todaysFlowId]);
   });
 });

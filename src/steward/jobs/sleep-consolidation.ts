@@ -150,19 +150,23 @@ export function buildSleepConsolidationSummary(params: {
     grouped.set(row.flow_id, current);
   }
 
-  const flowRows = db
-    .prepare(
-      `SELECT id, flow_type, status
-       FROM steward_flows
-       WHERE session_id = ?
-         AND created_ts < ?
-       ORDER BY id ASC`,
-    )
-    .all(params.sessionId, window.endTs) as Array<{
-    id: number;
-    flow_type: string;
-    status: string;
-  }>;
+  const activeFlowIds = Array.from(grouped.keys());
+  const flowRows =
+    activeFlowIds.length === 0
+      ? []
+      : (db
+          .prepare(
+            `SELECT id, flow_type, status
+             FROM steward_flows
+             WHERE session_id = ?
+               AND id IN (${activeFlowIds.map(() => "?").join(", ")})
+             ORDER BY id ASC`,
+          )
+          .all(params.sessionId, ...activeFlowIds) as Array<{
+          id: number;
+          flow_type: string;
+          status: string;
+        }>);
   const knowledgeCount = Number(
     ((db.prepare(`SELECT COUNT(*) AS count FROM steward_knowledge WHERE session_key = ?`).get(params.sessionKey ?? null) as {
       count: number;
