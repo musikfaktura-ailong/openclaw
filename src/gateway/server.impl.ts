@@ -775,6 +775,7 @@ export async function startGatewayServer(
       log,
     });
     runtimeState.heartbeatRunner = activated.heartbeatRunner;
+    runtimeState.autonomyBridge = activated.autonomyBridge;
 
     runtimeState.configReloader = startManagedGatewayConfigReloader({
       minimalTestGateway,
@@ -789,6 +790,7 @@ export async function startGatewayServer(
         hooksConfig: runtimeState.hooksConfig,
         hookClientIpConfig: runtimeState.hookClientIpConfig,
         heartbeatRunner: runtimeState.heartbeatRunner,
+        autonomyBridge: runtimeState.autonomyBridge,
         cronState: runtimeState.cronState,
         channelHealthMonitor: runtimeState.channelHealthMonitor,
       }),
@@ -796,6 +798,7 @@ export async function startGatewayServer(
         runtimeState.hooksConfig = nextState.hooksConfig;
         runtimeState.hookClientIpConfig = nextState.hookClientIpConfig;
         runtimeState.heartbeatRunner = nextState.heartbeatRunner;
+        runtimeState.autonomyBridge = nextState.autonomyBridge;
         runtimeState.cronState = nextState.cronState;
         deps.cron = runtimeState.cronState.cron;
         runtimeState.channelHealthMonitor = nextState.channelHealthMonitor;
@@ -827,6 +830,7 @@ export async function startGatewayServer(
     pluginServices: runtimeState.pluginServices,
     cron: runtimeState.cronState.cron,
     heartbeatRunner: runtimeState.heartbeatRunner,
+    autonomyBridge: runtimeState.autonomyBridge,
     updateCheckStop: runtimeState.stopGatewayUpdateCheck,
     stopTaskRegistryMaintenance,
     nodePresenceTimers,

@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JC merged via PR #21 (2026-05-01). Next slice: WS-K autonomous goal orchestration and host seam integration. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-K implemented on branch `ws-k` (2026-05-01). Awaiting reviewer gate. Carry-forwards open: CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5221,3 +5221,103 @@ Open carry-forwards:
 
 Next process step:
 - `STEWARD2 IMPLEMENT WS-K`
+
+## WS-K implementation gate (2026-05-01)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\OLD_AI\core\goal_orchestrator.py`
+- `C:\ai_agent\OLD_AI\core\scheduler.py`
+- `C:\ai_agent\PEQS\core\controller.py`
+- `src/infra/heartbeat-runner.ts`
+- `src/gateway/server-runtime-services.ts`
+
+Files added:
+- `src/steward/db/migrations/0004_autonomy_tasks.sql`
+- `src/steward/autonomy/goal-orchestrator.ts`
+- `src/steward/autonomy/triage-artifacts.ts`
+- `src/steward/autonomy/autonomy-bridge.ts`
+- `src/steward/autonomy/goal-orchestrator.test.ts`
+- `src/steward/autonomy/triage-artifacts.test.ts`
+- `src/steward/autonomy/autonomy-bridge.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/autonomy/idle-seeding.ts`
+- `src/steward/autonomy/autonomy-runner.ts`
+- `src/steward/autonomy/autonomy-runner.test.ts`
+- `src/gateway/server-runtime-services.ts`
+- `src/gateway/server-runtime-services.test.ts`
+- `src/gateway/server-runtime-handles.ts`
+- `src/gateway/server-reload-handlers.ts`
+- `src/gateway/server-close.ts`
+- `src/gateway/server.impl.ts`
+
+Host-owned invariant delivered in this slice:
+- steward autonomy now has its own host-owned timer seam and does not piggyback on the heartbeat LLM turn path
+- seeded autonomy work now resolves to a real host-owned task record instead of the synthetic `taskId = flowId` alias
+- seeded autonomy handoff/triage evidence is persisted as both a bounded artifact and a searchable DB knowledge reference
+- mutual exclusion remains host-owned:
+  - bridge cycle is serialized
+  - autonomy policy still blocks when a user turn is active
+  - no overlap is introduced between assistant-turn execution and autonomy seeding
+
+Behavior implemented:
+- `goal-orchestrator.ts`
+  - derives next-proof-first autonomy seed plans from current Steward2 state
+  - goal work is no longer generic:
+    - no proof -> research pick plan using `goals-registry.ts`
+    - rejected proof -> proof-repair plan
+    - accepted proof -> advance-validated-opportunity plan
+  - creates real host-owned autonomy task rows in new `steward_host_tasks`
+- `triage-artifacts.ts`
+  - persists bounded JSON triage artifacts under steward artifact storage
+  - stores a searchable `shared_thread` knowledge reference for each triage artifact
+  - emits `autonomy.triage.recorded`
+- `idle-seeding.ts`
+  - now uses goal-orchestrator + triage-artifacts
+  - inserts a real host task first, then links `steward_flow_tasks.task_id` to that host task id
+  - persists triage artifact path / knowledge id into flow state and seeded event evidence
+- `autonomy-runner.ts`
+  - is now async because seeded autonomy work persists artifacts/knowledge before returning
+  - removes the duplicate seeded-path `flow.created` event
+- `autonomy-bridge.ts`
+  - adds steward-owned timer runner, separate from heartbeat runner
+  - resolves target main-session keys from OpenClaw config
+  - runs one serialized bridge cycle:
+    - boot record
+    - then autonomy tick when lifecycle state permits
+  - emits `autonomy.bridge.tick`
+- gateway seam wiring
+  - `activateGatewayScheduledServices()` now starts both:
+    - heartbeat runner
+    - steward autonomy bridge
+  - close/reload/runtime mutable state now owns the autonomy bridge lifecycle too
+
+Focused acceptance evidence:
+- one harnessed bridge cycle shows:
+  - boot record persisted
+  - autonomy tick seeded
+  - triage artifact persisted
+  - host task row persisted
+  - flow-task link points to real host task id
+- runtime-running session remains mutually exclusive:
+  - bridge cycle does not seed host work when a user turn is active
+- goal-oriented autonomy work is explicit and proof-first, not generic maintenance filler
+- old `WS-IC` carry-forwards are resolved:
+  - `CF-IC-1` fixed by `steward_host_tasks`
+  - `CF-IC-2` fixed by removing duplicate seeded-path `flow.created`
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-runner.test.ts src/steward/autonomy/goal-orchestrator.test.ts src/steward/autonomy/triage-artifacts.test.ts src/steward/autonomy/autonomy-bridge.test.ts src/gateway/server-runtime-services.test.ts`
+  - PASS: `5` files, `11` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `WS-K` implementation
+
+Next process step:
+- `STEWARD2 REVIEW WS-K`

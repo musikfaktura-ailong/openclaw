@@ -15,7 +15,7 @@ describe("WS-IC autonomy runner", () => {
     resetDbForTest();
   });
 
-  it("blocks autonomy seeding when a user turn is active", () => {
+  it("blocks autonomy seeding when a user turn is active", async () => {
     const sessionKey = "agent:main:webchat:direct:auto-blocked";
     setAutonomyMode({ mode: "assistant_plus_autonomy", now: 1_000 });
     markAutonomyBootCompleted({ completed: true, now: 1_050 });
@@ -27,7 +27,7 @@ describe("WS-IC autonomy runner", () => {
       now: 1_150,
     });
 
-    const result = runAutonomyTick({
+    const result = await runAutonomyTick({
       sessionKey,
       now: 1_200,
     });
@@ -47,13 +47,13 @@ describe("WS-IC autonomy runner", () => {
     expect(event.data_json).toContain("\"reason\":\"user_turn_active\"");
   });
 
-  it("seeds exactly one goal-oriented task when autonomy is eligible", () => {
+  it("seeds exactly one goal-oriented task when autonomy is eligible", async () => {
     const sessionKey = "agent:main:webchat:direct:auto-seed";
     const authority = getOrCreateStewardSession(sessionKey, 1_000);
     setAutonomyMode({ mode: "assistant_plus_autonomy", now: 1_050 });
     markAutonomyBootCompleted({ completed: true, now: 1_100 });
 
-    const result = runAutonomyTick({
+    const result = await runAutonomyTick({
       sessionKey,
       now: 1_200,
     });
@@ -61,8 +61,11 @@ describe("WS-IC autonomy runner", () => {
       .prepare(`SELECT flow_type, status, state_json FROM steward_flows WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
       .get(authority.sessionId) as { flow_type: string; status: string; state_json: string };
     const tasks = getDb()
-      .prepare(`SELECT COUNT(*) AS count FROM steward_flow_tasks`)
-      .get() as { count: number };
+      .prepare(`SELECT task_id FROM steward_flow_tasks ORDER BY id DESC LIMIT 1`)
+      .get() as { task_id: number };
+    const hostTask = getDb()
+      .prepare(`SELECT id, title FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
+      .get() as { id: number; title: string };
     const seededEvent = getDb()
       .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.task.seeded' ORDER BY id DESC LIMIT 1`)
       .get() as { data_json: string };
@@ -76,11 +79,13 @@ describe("WS-IC autonomy runner", () => {
     expect(flow.status).toBe("resumable");
     expect(flow.state_json).toContain("\"seeded_by\":\"autonomy\"");
     expect(flow.state_json).toContain("\"autonomy_work_class\":\"goal_work\"");
-    expect(tasks.count).toBe(1);
+    expect(tasks.task_id).toBe(hostTask.id);
+    expect(hostTask.title).toContain("Research");
     expect(seededEvent.data_json).toContain("\"workClass\":\"goal_work\"");
+    expect(seededEvent.data_json).toContain("\"triageArtifactPath\"");
   });
 
-  it("suppresses duplicate autonomy work and persists noop backoff evidence", () => {
+  it("suppresses duplicate autonomy work and persists noop backoff evidence", async () => {
     const sessionKey = "agent:main:webchat:direct:auto-noop";
     const authority = getOrCreateStewardSession(sessionKey, 1_000);
     setAutonomyMode({ mode: "assistant_plus_autonomy", now: 1_050 });
@@ -104,7 +109,7 @@ describe("WS-IC autonomy runner", () => {
         1_150,
       );
 
-    const result = runAutonomyTick({
+    const result = await runAutonomyTick({
       sessionKey,
       now: 1_200,
     });

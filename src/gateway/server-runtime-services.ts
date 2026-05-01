@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isVitestRuntimeEnv } from "../infra/env.js";
 import { startHeartbeatRunner, type HeartbeatRunner } from "../infra/heartbeat-runner.js";
+import { startStewardAutonomyBridge, type AutonomyBridgeRunner } from "../steward/autonomy/autonomy-bridge.js";
 import type { ChannelHealthMonitor } from "./channel-health-monitor.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
 import { startGatewayModelPricingRefresh } from "./model-pricing-cache.js";
@@ -19,6 +20,13 @@ export type GatewayChannelManager = Parameters<
 >[0]["channelManager"];
 
 function createNoopHeartbeatRunner(): HeartbeatRunner {
+  return {
+    stop: () => {},
+    updateConfig: (_cfg: OpenClawConfig) => {},
+  };
+}
+
+function createNoopAutonomyBridge(): AutonomyBridgeRunner {
   return {
     stop: () => {},
     updateConfig: (_cfg: OpenClawConfig) => {},
@@ -75,6 +83,7 @@ export function startGatewayRuntimeServices(params: {
   log: GatewayRuntimeServiceLogger;
 }): {
   heartbeatRunner: HeartbeatRunner;
+  autonomyBridge: AutonomyBridgeRunner;
   channelHealthMonitor: ChannelHealthMonitor | null;
   stopModelPricingRefresh: () => void;
 } {
@@ -86,6 +95,7 @@ export function startGatewayRuntimeServices(params: {
 
   return {
     heartbeatRunner: createNoopHeartbeatRunner(),
+    autonomyBridge: createNoopAutonomyBridge(),
     channelHealthMonitor,
     stopModelPricingRefresh:
       !params.minimalTestGateway && !isVitestRuntimeEnv()
@@ -104,11 +114,15 @@ export function activateGatewayScheduledServices(params: {
   cron: { start: () => Promise<void> };
   logCron: { error: (message: string) => void };
   log: GatewayRuntimeServiceLogger;
-}): { heartbeatRunner: HeartbeatRunner } {
+}): { heartbeatRunner: HeartbeatRunner; autonomyBridge: AutonomyBridgeRunner } {
   if (params.minimalTestGateway) {
-    return { heartbeatRunner: createNoopHeartbeatRunner() };
+    return {
+      heartbeatRunner: createNoopHeartbeatRunner(),
+      autonomyBridge: createNoopAutonomyBridge(),
+    };
   }
   const heartbeatRunner = startHeartbeatRunner({ cfg: params.cfgAtStart });
+  const autonomyBridge = startStewardAutonomyBridge({ cfg: params.cfgAtStart });
   startGatewayCronWithLogging({
     cron: params.cron,
     logCron: params.logCron,
@@ -117,5 +131,5 @@ export function activateGatewayScheduledServices(params: {
     cfg: params.cfgAtStart,
     log: params.log,
   });
-  return { heartbeatRunner };
+  return { heartbeatRunner, autonomyBridge };
 }

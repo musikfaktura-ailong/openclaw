@@ -1,6 +1,11 @@
 import { getDb } from "../db/db-bootstrap.js";
 import type { StewardFlowTaskRole, StewardFlowType } from "../db/runtime-schema.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
+import {
+  createAutonomyHostTask,
+  resolveAutonomySeedPlan,
+} from "./goal-orchestrator.js";
+import { persistAutonomyTriageArtifact } from "./triage-artifacts.js";
 import type { AutonomyWorkClass } from "./work-classifier.js";
 
 export type SeededAutonomyTask = {
@@ -25,45 +30,6 @@ export type IdleSeedDecision =
       duplicateFlowId: number;
     };
 
-function workClassPlan(workClass: AutonomyWorkClass): {
-  flowType: StewardFlowType;
-  role: StewardFlowTaskRole;
-  title: string;
-  details: string;
-} {
-  switch (workClass) {
-    case "goal_work":
-      return {
-        flowType: "research",
-        role: "primary",
-        title: "Autonomy: seed next proof-oriented goal",
-        details: "Seed one bounded goal-oriented task that advances proof acquisition or validated operator value.",
-      };
-    case "diagnostic_work":
-      return {
-        flowType: "control",
-        role: "diagnostic",
-        title: "Autonomy: investigate blocked or failed runtime state",
-        details: "Seed one bounded diagnostic task to resolve an active blocker or repeated failure pattern.",
-      };
-    case "review_or_consolidation":
-      return {
-        flowType: "maintenance",
-        role: "diagnostic",
-        title: "Autonomy: review and consolidate recent steward evidence",
-        details: "Seed one bounded review/consolidation task without scheduling named recurring jobs in this slice.",
-      };
-    case "maintenance_work":
-    default:
-      return {
-        flowType: "maintenance",
-        role: "diagnostic",
-        title: "Autonomy: perform bounded maintenance follow-up",
-        details: "Seed one bounded maintenance task that improves runtime continuity without bypassing host-owned gates.",
-      };
-  }
-}
-
 function findDuplicateAutonomyFlow(sessionId: string, workClass: AutonomyWorkClass): number | null {
   const rows = getDb()
     .prepare(
@@ -87,12 +53,14 @@ function findDuplicateAutonomyFlow(sessionId: string, workClass: AutonomyWorkCla
   return null;
 }
 
-export function seedIdleAutonomyTask(params: {
+export async function seedIdleAutonomyTask(params: {
   sessionId: string;
+  sessionKey: string;
   workClass: AutonomyWorkClass;
   classificationReason: string;
+  artifactRoot?: string;
   now?: number;
-}): IdleSeedDecision {
+}): Promise<IdleSeedDecision> {
   const now = params.now ?? Date.now();
   const duplicateFlowId = findDuplicateAutonomyFlow(params.sessionId, params.workClass);
   if (duplicateFlowId != null) {
@@ -104,13 +72,41 @@ export function seedIdleAutonomyTask(params: {
     };
   }
 
-  const plan = workClassPlan(params.workClass);
+  const plan = resolveAutonomySeedPlan({
+    sessionId: params.sessionId,
+    workClass: params.workClass,
+    classificationReason: params.classificationReason,
+    now,
+  });
+  const triage = await persistAutonomyTriageArtifact({
+    sessionId: params.sessionId,
+    sessionKey: params.sessionKey,
+    workClass: params.workClass,
+    classificationReason: params.classificationReason,
+    plan,
+    artifactRoot: params.artifactRoot,
+    now,
+  });
+  const hostTask = createAutonomyHostTask({
+    sessionId: params.sessionId,
+    workClass: params.workClass,
+    title: plan.title,
+    details: plan.details,
+    triageArtifactPath: triage.artifactPath,
+    triageKnowledgeId: triage.knowledgeId,
+    now,
+  });
   const stateJson = JSON.stringify({
     seeded_by: "autonomy",
     autonomy_work_class: params.workClass,
     classification_reason: params.classificationReason,
     title: plan.title,
     details: plan.details,
+    host_task_id: hostTask.taskId,
+    triage_artifact_path: triage.artifactPath,
+    triage_knowledge_id: triage.knowledgeId,
+    goal_phase: plan.phase,
+    goal_kind: plan.goalKind,
   });
   const db = getDb();
   const flowResult = db
@@ -121,7 +117,7 @@ export function seedIdleAutonomyTask(params: {
     )
     .run(params.sessionId, plan.flowType, stateJson, process.pid, now, now, now) as { lastInsertRowid: number | bigint };
   const flowId = Number(flowResult.lastInsertRowid);
-  const taskId = flowId;
+  const taskId = hostTask.taskId;
   db.prepare(
     `INSERT INTO steward_flow_tasks (
        flow_id, task_id, role, link_status, created_ts, updated_ts
@@ -141,6 +137,10 @@ export function seedIdleAutonomyTask(params: {
       flowType: plan.flowType,
       role: plan.role,
       details: plan.details,
+      triageArtifactPath: triage.artifactPath,
+      triageKnowledgeId: triage.knowledgeId,
+      goalPhase: plan.phase,
+      goalKind: plan.goalKind,
     },
   });
 

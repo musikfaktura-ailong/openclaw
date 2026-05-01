@@ -8,6 +8,7 @@ import { startGmailWatcherWithLogs } from "../hooks/gmail-watcher-lifecycle.js";
 import { stopGmailWatcher } from "../hooks/gmail-watcher.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import type { HeartbeatRunner } from "../infra/heartbeat-runner.js";
+import type { AutonomyBridgeRunner } from "../steward/autonomy/autonomy-bridge.js";
 import { resetDirectoryCache } from "../infra/outbound/target-resolver.js";
 import {
   deferGatewayRestartUntilIdle,
@@ -46,6 +47,7 @@ type GatewayHotReloadState = {
   hooksConfig: ReturnType<typeof resolveHooksConfig>;
   hookClientIpConfig: HookClientIpConfig;
   heartbeatRunner: HeartbeatRunner;
+  autonomyBridge: AutonomyBridgeRunner;
   cronState: GatewayCronState;
   channelHealthMonitor: ChannelHealthMonitor | null;
 };
@@ -110,6 +112,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
 
     if (plan.restartHeartbeat) {
       nextState.heartbeatRunner.updateConfig(nextConfig);
+      nextState.autonomyBridge.updateConfig(nextConfig);
     }
 
     resetDirectoryCache();
