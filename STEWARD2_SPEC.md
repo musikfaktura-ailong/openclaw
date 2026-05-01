@@ -4886,6 +4886,23 @@ Result:
   - `CF-JB-2`
   - `CF-JB-3`
 
+## WS-JB re-review gate (2026-05-01)
+
+Reviewer: Claude
+
+Verdict: **PASS** (confirmed post-fix, commit 0f4d0cc3b5)
+
+Fix verified:
+- `buildSleepConsolidationSummary()` now derives `flowRows` from `activeFlowIds` (flows with at least one event inside the UTC day window) instead of `created_ts < window.endTs`. Historical flows with no day-window activity are excluded.
+- `activeFlowIds.length === 0` early-exit handles an empty day correctly.
+- Test updated: `flowCount === 1` and `flowSummaries` contains only `todaysFlowId` with yesterday's flow absent.
+- 4/4 sleep-consolidation tests pass.
+
+Remaining open carry-forwards (all non-blocking): CF-JB-1, CF-JB-2, CF-JB-3. No new issues introduced.
+
+Next process step:
+- `STEWARD2 ADVANCE WS-JB`
+
 ## WS-JA implementation gate (2026-04-30)
 
 Implementer: Codex
