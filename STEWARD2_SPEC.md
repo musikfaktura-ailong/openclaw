@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JA merged via PR #19 (2026-05-01). Next slice: WS-JB sleep consolidation job. Carry-forwards open: CF-IC-1, CF-IC-2.**
+Current phase: **WS-JB implemented (2026-05-01). Ready for reviewer gate. Carry-forwards open: CF-IC-1, CF-IC-2.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4773,6 +4773,73 @@ Carry-forwards still open:
 
 Next process step:
 - `STEWARD2 IMPLEMENT WS-JB`
+
+## WS-JB implementation gate (2026-05-01)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\OLD_AI\jobs\sleep_consolidation.py`
+
+Files added:
+- `src/steward/jobs/sleep-consolidation.ts`
+- `src/steward/jobs/sleep-consolidation.test.ts`
+
+Files changed:
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/jobs/job-types.ts`
+
+Host-owned invariant delivered in this slice:
+- sleep consolidation is now a steward-owned recurring job module, not a manual maintenance note
+- one consolidation record per UTC day is enforced by DB dedupe against prior `sleep_consolidation` job flows
+- consolidation produces persisted day-summary evidence plus an auditable archive/redaction record
+- pruning is bounded and safe:
+  - no row deletions from `steward_events`
+  - only a narrow allowlist of old low-value event payloads is redacted
+  - active runtime state is untouched
+
+Behavior implemented:
+- `sleep-consolidation.ts`
+  - builds a bounded UTC-day summary from steward DB state:
+    - event count
+    - flow count
+    - knowledge count
+    - per-flow event summary
+  - writes a JSON artifact under steward artifact storage:
+    - `artifacts/steward/sleep/<day>/<sessionId>.day-summary.json`
+  - stores a `shared_thread` knowledge entry referencing the summary artifact
+  - records one completed maintenance flow/task per UTC day for `sleep_consolidation`
+  - persists job evidence through:
+    - `job.sleep_consolidation.recorded`
+    - `job.sleep_consolidation.reused`
+    - `job.sleep_consolidation.pruned`
+  - archives and redacts only old payloads from a narrow safe allowlist:
+    - `session.touched`
+    - `autonomy.policy.allowed`
+    - `autonomy.policy.blocked`
+    - `autonomy.tick.blocked`
+    - `autonomy.tick.noop`
+  - writes archived payloads to gzip JSONL and redacts DB payloads in-place instead of deleting rows
+
+Focused acceptance evidence:
+- first run creates one completed maintenance flow with `job_type = "sleep_consolidation"`
+- same-day rerun reuses the existing flow and emits `job.sleep_consolidation.reused`
+- day summary artifact path is persisted in both flow state and recorded event
+- pruning preserves event rows while redacting only allowed old payloads and recording archive evidence
+- summary window is bounded to the current UTC day, not arbitrary history
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/jobs/sleep-consolidation.test.ts src/steward/jobs/daily-self-review.test.ts src/steward/memory/relationship-memory.test.ts`
+  - PASS: `3` files, `11` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `WS-JB`
+
+Next process step:
+- reviewer gate for `WS-JB`
 
 ## WS-JA implementation gate (2026-04-30)
 
