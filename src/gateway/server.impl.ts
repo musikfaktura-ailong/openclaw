@@ -529,6 +529,7 @@ export async function startGatewayServer(
       pluginServices: runtimeState.pluginServices,
       cron: runtimeState.cronState.cron,
       heartbeatRunner: runtimeState.heartbeatRunner,
+      autonomyBridge: runtimeState.autonomyBridge,
       updateCheckStop: runtimeState.stopGatewayUpdateCheck,
       stopTaskRegistryMaintenance,
       nodePresenceTimers,

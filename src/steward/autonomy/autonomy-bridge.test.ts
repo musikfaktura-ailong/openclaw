@@ -6,7 +6,7 @@ import { closeStewardDb, getDb, initStewardDb, resetDbForTest } from "../db/db-b
 import { markAutonomyBootCompleted, setAutonomyMode } from "./autonomy-state.js";
 import { markRuntimeRunning } from "../runtime/runtime-state-repo.js";
 import { getOrCreateStewardSession } from "../runtime/session-authority.js";
-import { runAutonomyBridgeCycle } from "./autonomy-bridge.js";
+import { runAutonomyBridgeCycle, startStewardAutonomyBridge } from "./autonomy-bridge.js";
 
 describe("WS-K autonomy bridge", () => {
   beforeEach(() => {
@@ -87,5 +87,46 @@ describe("WS-K autonomy bridge", () => {
     expect(result.tick?.status).toBe("blocked");
     expect(result.tick?.reason).toBe("user_turn_active");
     expect(hostTaskCount.count).toBe(0);
+  });
+
+  it("captures bridge cycle failures as persisted steward events", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-bridge-fail-"));
+    const blockingFile = path.join(tempRoot, "not-a-directory.txt");
+    await fs.writeFile(blockingFile, "x", "utf8");
+    const runner = startStewardAutonomyBridge({
+      cfg: {
+        agents: {
+          default: "main",
+          list: [{ id: "main", label: "Main" }],
+        },
+      } as never,
+      artifactRoot: blockingFile,
+      intervalMs: 1_000,
+      nowMs: (() => {
+        let ts = 3_000;
+        return () => ++ts;
+      })(),
+    });
+    try {
+      setAutonomyMode({ mode: "assistant_plus_autonomy", now: 3_000 });
+
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+      const failedEvent = getDb()
+        .prepare(
+          `SELECT kind, data_json
+           FROM steward_events
+           WHERE kind = 'autonomy.bridge.failed'
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get() as { kind: string; data_json: string } | undefined;
+
+      expect(failedEvent?.kind).toBe("autonomy.bridge.failed");
+      expect(failedEvent?.data_json).toContain("not-a-directory.txt");
+    } finally {
+      runner.stop();
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

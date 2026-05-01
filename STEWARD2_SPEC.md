@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-K implemented on branch `ws-k` (2026-05-01). Awaiting reviewer gate. Carry-forwards open: CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-K reviewer findings resolved on branch `ws-k` (2026-05-01). Ready for ADVANCE. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5319,5 +5319,64 @@ Verification:
 Carry-forward:
 - none added by `WS-K` implementation
 
+## WS-K reviewer gate (2026-05-01)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+Resolved carry-forwards confirmed:
+- `CF-IC-1` — `steward_host_tasks` table with real FK-backed task IDs. `idle-seeding.ts` now sets `taskId = hostTask.taskId` (not `flowId`). Bridge test proves `flowTask.task_id === hostTask.id`.
+- `CF-IC-2` — `flow.created` removed from `autonomy-runner.ts`. Bridge test asserts count = 0.
+
+Findings:
+
+1. Host-timer seam correct — `startStewardAutonomyBridge` uses its own `setInterval` timer, separate from heartbeat. `state.running` flag serializes concurrent cycles. `timer.unref?.()` prevents process hold.
+2. Real host task references confirmed — `steward_host_tasks` row created before flow insert; `steward_flow_tasks.task_id` points to `steward_host_tasks.id`. Path and knowledge ID persisted in `state_json` and seeded event.
+3. Triage artifact persistence confirmed — bounded JSON written to `artifacts/steward/autonomy/<day>/`. `shared_thread` knowledge entry with `autonomy_triage_ref: true`. `autonomy.triage.recorded` emitted.
+4. Mutual exclusion confirmed — `tickAll` `state.running` guard prevents overlap; `evaluateAutonomyRunPolicy` blocks on user-turn-active. Test: `hostTaskCount = 0` when runtime running.
+5. Harnessed evidence confirmed — one cycle: boot recorded → tick seeded → triage artifact present → host task linked → `flow.created` absent.
+6. 11/11 tests pass (5 test files).
+
+Carry-forwards added:
+
+- `CF-K-1` — `autonomy-runner.test.ts` seeded-task test calls `runAutonomyTick` without `artifactRoot`, causing real triage JSON files to be written to `process.cwd()/artifacts/steward` with no cleanup. Add `tempRoot` + cleanup to match bridge and triage tests.
+- `CF-K-2` — `tickAll` in `autonomy-bridge.ts` swallows cycle errors silently. A failed `runAutonomyBridgeCycle` (e.g., disk-full on triage write) produces no event, no log, no re-throw. Add error capture and event emission before WS-K advancement gate.
+- `CF-K-3` — `repair_rejected_proof` and `advance_validated_opportunity` branches in `buildGoalWorkPlan` are untested. Add to `goal-orchestrator.test.ts` before advancement gate.
+- `CF-K-4` — `shouldRunTick` double condition: `boot.alreadyCompleted && getAutonomyState().bootCompleted` — second check is redundant since `alreadyCompleted` implies `bootCompleted`. Non-blocking, simplify to `boot.alreadyCompleted`.
+- `CF-K-5` — `autonomyBridge?: AutonomyBridgeRunner` optional in `server-close.ts` while `heartbeatRunner` is required. Noop bridge is always present, so `stop()` is always called, but the type inconsistency is misleading. Non-blocking.
+
 Next process step:
-- `STEWARD2 REVIEW WS-K`
+- `STEWARD2 ADVANCE WS-K`
+
+## WS-K post-review fixes (2026-05-01)
+
+Codex resolved all five reviewer carry-forwards on `ws-k` before advancement:
+
+- `CF-K-1` fixed in `src/steward/autonomy/autonomy-runner.test.ts`
+  - seeded-task test now uses a temp `artifactRoot`
+  - test cleanup removes its temporary triage files instead of writing into repo `artifacts/`
+- `CF-K-2` fixed in `src/steward/autonomy/autonomy-bridge.ts`
+  - `tickAll()` now captures per-session cycle failures
+  - failures persist explicit `autonomy.bridge.failed` event evidence instead of disappearing silently
+  - focused bridge test added in `src/steward/autonomy/autonomy-bridge.test.ts`
+- `CF-K-3` fixed in `src/steward/autonomy/goal-orchestrator.test.ts`
+  - added explicit coverage for:
+    - `repair_rejected_proof`
+    - `advance_validated_opportunity`
+- `CF-K-4` fixed in `src/steward/autonomy/autonomy-bridge.ts`
+  - removed redundant double-check in `shouldRunTick`
+  - boot-complete path now uses `boot.alreadyCompleted` directly
+- `CF-K-5` fixed in `src/gateway/server-close.ts`
+  - `autonomyBridge` is now required in the close handler params
+  - startup/shutdown callsites and tests now match the actual noop-always-present runtime contract
+
+Additional verification after the fixes:
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-runner.test.ts src/steward/autonomy/goal-orchestrator.test.ts src/steward/autonomy/triage-artifacts.test.ts src/steward/autonomy/autonomy-bridge.test.ts src/gateway/server-runtime-services.test.ts src/gateway/server-close.test.ts`
+  - PASS: `6` files, `19` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Result:
+- `WS-K` is now advance-ready with no open `WS-K` carry-forwards

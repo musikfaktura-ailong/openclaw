@@ -75,7 +75,7 @@ export function createGatewayCloseHandler(params: {
   pluginServices: PluginServicesHandle | null;
   cron: { stop: () => void };
   heartbeatRunner: HeartbeatRunner;
-  autonomyBridge?: AutonomyBridgeRunner;
+  autonomyBridge: AutonomyBridgeRunner;
   updateCheckStop?: (() => void) | null;
   stopTaskRegistryMaintenance?: (() => void) | null;
   nodePresenceTimers: Map<string, ReturnType<typeof setInterval>>;
@@ -137,7 +137,7 @@ export function createGatewayCloseHandler(params: {
       await stopGmailWatcher();
       params.cron.stop();
       params.heartbeatRunner.stop();
-      params.autonomyBridge?.stop();
+      params.autonomyBridge.stop();
       try {
         params.stopTaskRegistryMaintenance?.();
       } catch {

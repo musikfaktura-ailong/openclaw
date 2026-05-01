@@ -2,7 +2,7 @@ import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
-import { getAutonomyState } from "./autonomy-state.js";
+import { getOrCreateStewardSession } from "../runtime/session-authority.js";
 import { recordAutonomyBootSequence, type BootRecord } from "./boot-sequence.js";
 import { runAutonomyTick, type AutonomyTickOutcome } from "./autonomy-runner.js";
 
@@ -45,8 +45,7 @@ export async function runAutonomyBridgeCycle(params: {
     lmStudioLifecycleReady: params.lmStudioLifecycleReady,
   });
   const shouldRunTick =
-    boot.nextActionClass === "seed_first_task" ||
-    (boot.alreadyCompleted && getAutonomyState().bootCompleted);
+    boot.nextActionClass === "seed_first_task" || boot.alreadyCompleted;
   const tick = shouldRunTick
     ? await runAutonomyTick({
         sessionKey: params.sessionKey,
@@ -105,11 +104,26 @@ export function startStewardAutonomyBridge(params: {
     state.running = true;
     try {
       for (const sessionKey of state.sessionKeys) {
-        await runAutonomyBridgeCycle({
-          sessionKey,
-          now: nowMs(),
-          artifactRoot: params.artifactRoot,
-        });
+        const tickNow = nowMs();
+        try {
+          await runAutonomyBridgeCycle({
+            sessionKey,
+            now: tickNow,
+            artifactRoot: params.artifactRoot,
+          });
+        } catch (error) {
+          const authority = getOrCreateStewardSession(sessionKey, tickNow);
+          appendStewardEvent({
+            kind: "autonomy.bridge.failed",
+            message: "autonomy bridge cycle failed",
+            sessionId: authority.sessionId,
+            now: tickNow,
+            data: {
+              sessionKey,
+              error: String(error),
+            },
+          });
+        }
       }
     } finally {
       state.running = false;

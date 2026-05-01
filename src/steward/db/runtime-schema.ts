@@ -30,6 +30,7 @@ export type StewardEventKind =
   | "autonomy.policy.allowed"
   | "autonomy.policy.blocked"
   | "autonomy.bridge.tick"
+  | "autonomy.bridge.failed"
   | "autonomy.tick.blocked"
   | "autonomy.tick.noop"
   | "autonomy.task.seeded"

@@ -47,4 +47,52 @@ describe("WS-K goal orchestrator", () => {
     expect(row.title).toContain("Research");
     expect(row.source).toBe("autonomy");
   });
+
+  it("routes rejected latest proof into repair_rejected_proof planning", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:ws-k-goal-c", 1_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (21, ?, NULL, 'contribution', ?, 'proof', 'history', 'rejected', ?, ?, 0, '', NULL, ?, 'rejected', ?)` ,
+      )
+      .run(authority.sessionId, "Candidate proof", 0.42, "grounding_gap", 2_000, 2_000);
+
+    const plan = resolveAutonomySeedPlan({
+      sessionId: authority.sessionId,
+      workClass: "goal_work",
+      classificationReason: "latest_proof_rejected",
+      now: 2_100,
+    });
+
+    expect(plan.goalKind).toBe("repair_rejected_proof");
+    expect(plan.phase).toBe("prove");
+    expect(plan.title).toContain("repair rejected steward proof");
+    expect(plan.details).toContain("grounding_gap");
+  });
+
+  it("routes accepted latest proof into advance_validated_opportunity planning", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:ws-k-goal-d", 1_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (22, ?, NULL, 'contribution', ?, 'proof', 'history', 'accepted', ?, '', 1, '', ?, NULL, '', ?)` ,
+      )
+      .run(authority.sessionId, "Validated operator-safe opportunity", 0.93, 2_000, 2_000);
+
+    const plan = resolveAutonomySeedPlan({
+      sessionId: authority.sessionId,
+      workClass: "goal_work",
+      classificationReason: "latest_proof_accepted",
+      now: 2_100,
+    });
+
+    expect(plan.goalKind).toBe("advance_validated_opportunity");
+    expect(plan.phase).toBe("commit");
+    expect(plan.title).toContain("advance strongest steward opportunity");
+    expect(plan.details).toContain("Validated operator-safe opportunity");
+  });
 });

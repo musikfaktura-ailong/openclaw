@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeStewardDb, getDb, initStewardDb, resetDbForTest } from "../db/db-bootstrap.js";
 import { markAutonomyBootCompleted, setAutonomyMode } from "./autonomy-state.js";
@@ -48,41 +51,47 @@ describe("WS-IC autonomy runner", () => {
   });
 
   it("seeds exactly one goal-oriented task when autonomy is eligible", async () => {
-    const sessionKey = "agent:main:webchat:direct:auto-seed";
-    const authority = getOrCreateStewardSession(sessionKey, 1_000);
-    setAutonomyMode({ mode: "assistant_plus_autonomy", now: 1_050 });
-    markAutonomyBootCompleted({ completed: true, now: 1_100 });
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-runner-"));
+    try {
+      const sessionKey = "agent:main:webchat:direct:auto-seed";
+      const authority = getOrCreateStewardSession(sessionKey, 1_000);
+      setAutonomyMode({ mode: "assistant_plus_autonomy", now: 1_050 });
+      markAutonomyBootCompleted({ completed: true, now: 1_100 });
 
-    const result = await runAutonomyTick({
-      sessionKey,
-      now: 1_200,
-    });
-    const flow = getDb()
-      .prepare(`SELECT flow_type, status, state_json FROM steward_flows WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
-      .get(authority.sessionId) as { flow_type: string; status: string; state_json: string };
-    const tasks = getDb()
-      .prepare(`SELECT task_id FROM steward_flow_tasks ORDER BY id DESC LIMIT 1`)
-      .get() as { task_id: number };
-    const hostTask = getDb()
-      .prepare(`SELECT id, title FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
-      .get() as { id: number; title: string };
-    const seededEvent = getDb()
-      .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.task.seeded' ORDER BY id DESC LIMIT 1`)
-      .get() as { data_json: string };
+      const result = await runAutonomyTick({
+        sessionKey,
+        artifactRoot: tempRoot,
+        now: 1_200,
+      });
+      const flow = getDb()
+        .prepare(`SELECT flow_type, status, state_json FROM steward_flows WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
+        .get(authority.sessionId) as { flow_type: string; status: string; state_json: string };
+      const tasks = getDb()
+        .prepare(`SELECT task_id FROM steward_flow_tasks ORDER BY id DESC LIMIT 1`)
+        .get() as { task_id: number };
+      const hostTask = getDb()
+        .prepare(`SELECT id, title FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
+        .get() as { id: number; title: string };
+      const seededEvent = getDb()
+        .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.task.seeded' ORDER BY id DESC LIMIT 1`)
+        .get() as { data_json: string };
 
-    expect(result).toMatchObject({
-      status: "seeded",
-      workClass: "goal_work",
-      reason: "no_recorded_proof_yet",
-    });
-    expect(flow.flow_type).toBe("research");
-    expect(flow.status).toBe("resumable");
-    expect(flow.state_json).toContain("\"seeded_by\":\"autonomy\"");
-    expect(flow.state_json).toContain("\"autonomy_work_class\":\"goal_work\"");
-    expect(tasks.task_id).toBe(hostTask.id);
-    expect(hostTask.title).toContain("Research");
-    expect(seededEvent.data_json).toContain("\"workClass\":\"goal_work\"");
-    expect(seededEvent.data_json).toContain("\"triageArtifactPath\"");
+      expect(result).toMatchObject({
+        status: "seeded",
+        workClass: "goal_work",
+        reason: "no_recorded_proof_yet",
+      });
+      expect(flow.flow_type).toBe("research");
+      expect(flow.status).toBe("resumable");
+      expect(flow.state_json).toContain("\"seeded_by\":\"autonomy\"");
+      expect(flow.state_json).toContain("\"autonomy_work_class\":\"goal_work\"");
+      expect(tasks.task_id).toBe(hostTask.id);
+      expect(hostTask.title).toContain("Research");
+      expect(seededEvent.data_json).toContain("\"workClass\":\"goal_work\"");
+      expect(seededEvent.data_json).toContain("\"triageArtifactPath\"");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("suppresses duplicate autonomy work and persists noop backoff evidence", async () => {
