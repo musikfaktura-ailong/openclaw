@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JC implemented on branch `ws-jc` (2026-05-01). Awaiting reviewer gate. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-JC reviewer findings resolved on branch `ws-jc` (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5138,5 +5138,57 @@ Verification:
 Carry-forward:
 - none added by `WS-JC` implementation
 
+## WS-JC reviewer gate (2026-05-01)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+Findings:
+
+1. DB-native inputs confirmed — snapshot reads only from `steward_proofs`, `steward_memories`, and `steward_events`. No PEQS tables, no file reads, no external dependencies.
+2. Deterministic approve/reject ownership — `buildDecision()` is a strict 6-check priority chain. One code path to approval, six typed rejection reasons. No ambiguity.
+3. Cooldown reuse correct — `cooldown_until_ts` read from prior flow `state_json`; reuse emits `job.strategy_validation.reused` and does not create a new flow. Test proves `flowCount === 1` within cooldown.
+4. Rejection-burn escalation correct — consecutive rejection count counted from most-recent-first, stops at first approval. `rejectionCountBase = count + 1` → always ≥ 1. `applyRejectionBurn` uses exponential scale. Approval resets to 0, restarts cleanly on next rejection.
+5. Bonus/burn wired correctly — `applyValidationBonus` on approved, `applyRejectionBurn` on rejected. Both stored in `state_json` and knowledge metadata. Budget change confirmed by tests.
+6. Persisted evidence complete — `job.strategy_validation.recorded` + `approved`/`rejected` events, `shared_thread` knowledge entry with `strategy_validation_ref: true`. Decision, snapshot, cooldown, and budget adjustment all queryable.
+7. 4/4 tests pass.
+
+Carry-forwards added:
+
+- `CF-JC-1` — `validationKnowledgeId: 0` sentinel returned on reuse path instead of the actual knowledge ID from the prior flow's `state_json.validation_knowledge_id`. Non-blocking since `reused: true` signals the caller, but misleading.
+- `CF-JC-2` — `applyRejectionBurn`/`applyValidationBonus` called with `decision.flowId` / `decision.taskId` (proof IDs, possibly null) before the validation flow row is inserted. Audit trail links burn/bonus to the proof's flow, not the validation job's own flow. Minor audit-trail gap.
+- `CF-JC-3` — 4 of 7 rejection reason branches untested: `no_candidate_proof`, `proof_not_grounded`, `proof_not_accepted`, `recent_task_value_low`. Add before advancement gate.
+
 Next process step:
-- `STEWARD2 REVIEW WS-JC`
+- `STEWARD2 ADVANCE WS-JC`
+
+## WS-JC post-review fixes (2026-05-01)
+
+Codex resolved all three reviewer carry-forwards on `ws-jc` before advancement:
+
+- `CF-JC-1` fixed in `src/steward/jobs/strategy-validation.ts`
+  - reuse path now returns the real `validationKnowledgeId` from prior flow state
+  - `job.strategy_validation.reused` event now includes that same persisted ID
+- `CF-JC-2` fixed in `src/steward/jobs/strategy-validation.ts`
+  - validation flow/task is now created before bonus/burn is applied
+  - mission time audit events now bind to the validation job’s own `flowId` / `taskId`, not the proof’s flow
+- `CF-JC-3` fixed in `src/steward/jobs/strategy-validation.test.ts`
+  - added explicit coverage for the previously untested deterministic rejection paths:
+    - `no_candidate_proof`
+    - `proof_not_accepted`
+    - `proof_not_grounded`
+    - `recent_task_value_low`
+  - also added:
+    - reuse-path knowledge-ID coverage
+    - audit-trail flow ownership coverage
+
+Additional verification after the fixes:
+- `corepack pnpm exec vitest run src/steward/jobs/strategy-validation.test.ts`
+  - PASS: `1` file, `9` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Result:
+- `WS-JC` is now advance-ready with no open `WS-JC` carry-forwards

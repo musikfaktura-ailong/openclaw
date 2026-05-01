@@ -185,6 +185,7 @@ describe("WS-JC strategy validation job", () => {
     expect(first.created).toBe(true);
     expect(second.reused).toBe(true);
     expect(second.flowId).toBe(first.flowId);
+    expect(second.validationKnowledgeId).toBe(first.validationKnowledgeId);
     expect(flowCount.count).toBe(1);
   });
 
@@ -208,5 +209,124 @@ describe("WS-JC strategy validation job", () => {
 
     expect(result.decision.verdict).toBe("rejected");
     expect(result.decision.reason).toBe("proof_score_below_threshold");
+  });
+
+  it("writes budget audit events against the validation flow, not the proof flow", async () => {
+    const sessionKey = "agent:main:webchat:direct:strategy-validation-flow-audit";
+    const authority = getOrCreateStewardSession(sessionKey, 1_000);
+    const db = getDb();
+    const proofFlowResult = db
+      .prepare(
+        `INSERT INTO steward_flows (
+           session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, 'research', 'completed', '{}', ?, ?, ?, ?)`,
+      )
+      .run(authority.sessionId, process.pid, 1_500, 1_500, 1_500) as {
+      lastInsertRowid: number | bigint;
+    };
+    const proofFlowId = Number(proofFlowResult.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO steward_proofs (
+         task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+         verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+       ) VALUES (15, ?, ?, 'contribution', 'Flow audit opportunity', 'proof', 'history', 'accepted', 0.93, '', 1, '', ?, NULL, '', ?)`,
+    ).run(authority.sessionId, proofFlowId, 2_000, 2_000);
+
+    const result = await runStrategyValidationJob({
+      sessionKey,
+      now: 3_000,
+      embedder,
+    });
+    const budgetEvent = db
+      .prepare(`SELECT flow_id, data_json FROM steward_events WHERE kind = 'mission.time.updated' ORDER BY id DESC LIMIT 1`)
+      .get() as { flow_id: number; data_json: string };
+
+    expect(budgetEvent.flow_id).toBe(result.flowId);
+    expect(budgetEvent.flow_id).not.toBe(proofFlowId);
+    expect(budgetEvent.data_json).toContain(`"taskId":${result.taskId}`);
+  });
+
+  it("rejects when no candidate proof exists", async () => {
+    const result = await runStrategyValidationJob({
+      sessionKey: "agent:main:webchat:direct:strategy-validation-no-proof",
+      now: 3_000,
+      embedder,
+    });
+
+    expect(result.decision.verdict).toBe("rejected");
+    expect(result.decision.reason).toBe("no_candidate_proof");
+  });
+
+  it("rejects when the latest proof is not accepted", async () => {
+    const sessionKey = "agent:main:webchat:direct:strategy-validation-not-accepted";
+    const authority = getOrCreateStewardSession(sessionKey, 1_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (16, ?, NULL, 'contribution', 'Rejected opportunity', 'proof', 'history', 'rejected', 0.93, '', 1, '', NULL, ?, 'rejected', ?)`,
+      )
+      .run(authority.sessionId, 2_000, 2_000);
+
+    const result = await runStrategyValidationJob({
+      sessionKey,
+      now: 3_000,
+      embedder,
+    });
+
+    expect(result.decision.verdict).toBe("rejected");
+    expect(result.decision.reason).toBe("proof_not_accepted");
+  });
+
+  it("rejects when the latest proof is not grounded", async () => {
+    const sessionKey = "agent:main:webchat:direct:strategy-validation-not-grounded";
+    const authority = getOrCreateStewardSession(sessionKey, 1_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (17, ?, NULL, 'contribution', 'Ungrounded opportunity', 'proof', 'history', 'accepted', 0.93, '', 0, '', ?, NULL, '', ?)`,
+      )
+      .run(authority.sessionId, 2_000, 2_000);
+
+    const result = await runStrategyValidationJob({
+      sessionKey,
+      now: 3_000,
+      embedder,
+    });
+
+    expect(result.decision.verdict).toBe("rejected");
+    expect(result.decision.reason).toBe("proof_not_grounded");
+  });
+
+  it("rejects when the latest task value is low or hollow", async () => {
+    const sessionKey = "agent:main:webchat:direct:strategy-validation-low-task-value";
+    const authority = getOrCreateStewardSession(sessionKey, 1_000);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_proofs (
+         task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+         verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+       ) VALUES (18, ?, NULL, 'contribution', 'Low value opportunity', 'proof', 'history', 'accepted', 0.93, '', 1, '', ?, NULL, '', ?)`,
+    ).run(authority.sessionId, 2_000, 2_000);
+    db.prepare(
+      `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+       VALUES (?, ?, NULL, 'mission.task_value.adjudicated', 'task value', ?)`,
+    ).run(
+      2_100,
+      authority.sessionId,
+      JSON.stringify({ label: "low_value", score: 3 }),
+    );
+
+    const result = await runStrategyValidationJob({
+      sessionKey,
+      now: 3_000,
+      embedder,
+    });
+
+    expect(result.decision.verdict).toBe("rejected");
+    expect(result.decision.reason).toBe("recent_task_value_low");
   });
 });

@@ -71,6 +71,7 @@ type PriorValidationFlow = {
   taskId: number;
   createdTs: number;
   cooldownUntilTs: number | null;
+  validationKnowledgeId: number | null;
   decision: StrategyValidationDecision | null;
 };
 
@@ -115,6 +116,8 @@ function findLatestStrategyValidationFlow(sessionId: string): PriorValidationFlo
       createdTs: Number(row.created_ts),
       cooldownUntilTs:
         state.cooldown_until_ts == null ? null : Number(state.cooldown_until_ts),
+      validationKnowledgeId:
+        state.validation_knowledge_id == null ? null : Number(state.validation_knowledge_id),
       decision: decisionRaw
         ? {
             verdict:
@@ -359,6 +362,7 @@ export async function runStrategyValidationJob(params: {
       data: {
         taskId: existing.taskId,
         cooldownUntilTs: existing.cooldownUntilTs,
+        validationKnowledgeId: existing.validationKnowledgeId,
         validationDecision: existing.decision,
       },
     });
@@ -368,7 +372,7 @@ export async function runStrategyValidationJob(params: {
       flowId: existing.flowId,
       taskId: existing.taskId,
       cooldownUntilTs: existing.cooldownUntilTs,
-      validationKnowledgeId: 0,
+      validationKnowledgeId: existing.validationKnowledgeId ?? 0,
       decision: existing.decision,
       budgetAdjustment: null,
     };
@@ -387,19 +391,50 @@ export async function runStrategyValidationJob(params: {
     rejectionCount: rejectionCountBase,
   });
   const cooldownUntilTs = now + STRATEGY_VALIDATION_CADENCE_MS;
+  const flowResult = db
+    .prepare(
+      `INSERT INTO steward_flows (
+         session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+       ) VALUES (?, 'maintenance', 'completed', ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      authority.sessionId,
+      JSON.stringify({
+        job_type: "strategy_validation",
+        snapshot,
+        validation_decision: decision,
+        cooldown_until_ts: cooldownUntilTs,
+        validation_knowledge_id: null,
+        budget_adjustment: null,
+      }),
+      process.pid,
+      now,
+      now,
+      now,
+    ) as {
+    lastInsertRowid: number | bigint;
+  };
+  const flowId = Number(flowResult.lastInsertRowid);
+  const taskId = flowId;
+  db.prepare(
+    `INSERT INTO steward_flow_tasks (
+       flow_id, task_id, role, link_status, created_ts, updated_ts
+     ) VALUES (?, ?, 'diagnostic', 'succeeded', ?, ?)`,
+  ).run(flowId, taskId, now, now);
+
   const budgetAdjustment =
     decision.verdict === "approved"
       ? applyValidationBonus({
           sessionId: authority.sessionId,
-          flowId: decision.flowId,
-          taskId: decision.taskId,
+          flowId,
+          taskId,
           now,
         })
       : applyRejectionBurn({
           rejectionCount: decision.rejectionCount,
           sessionId: authority.sessionId,
-          flowId: decision.flowId,
-          taskId: decision.taskId,
+          flowId,
+          taskId,
           now,
         });
 
@@ -424,30 +459,19 @@ export async function runStrategyValidationJob(params: {
     },
   });
 
-  const stateJson = JSON.stringify({
-    job_type: "strategy_validation",
-    snapshot,
-    validation_decision: decision,
-    cooldown_until_ts: cooldownUntilTs,
-    validation_knowledge_id: validationKnowledgeId,
-    budget_adjustment: budgetAdjustment,
-  });
-  const flowResult = db
-    .prepare(
-      `INSERT INTO steward_flows (
-         session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
-       ) VALUES (?, 'maintenance', 'completed', ?, ?, ?, ?, ?)`,
-    )
-    .run(authority.sessionId, stateJson, process.pid, now, now, now) as {
-    lastInsertRowid: number | bigint;
-  };
-  const flowId = Number(flowResult.lastInsertRowid);
-  const taskId = flowId;
-  db.prepare(
-    `INSERT INTO steward_flow_tasks (
-       flow_id, task_id, role, link_status, created_ts, updated_ts
-     ) VALUES (?, ?, 'diagnostic', 'succeeded', ?, ?)`,
-  ).run(flowId, taskId, now, now);
+  db.prepare(`UPDATE steward_flows SET state_json = ?, updated_ts = ?, heartbeat_ts = ? WHERE id = ?`).run(
+    JSON.stringify({
+      job_type: "strategy_validation",
+      snapshot,
+      validation_decision: decision,
+      cooldown_until_ts: cooldownUntilTs,
+      validation_knowledge_id: validationKnowledgeId,
+      budget_adjustment: budgetAdjustment,
+    }),
+    now,
+    now,
+    flowId,
+  );
 
   const eventData = {
     taskId,
