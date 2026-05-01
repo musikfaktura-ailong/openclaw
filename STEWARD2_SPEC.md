@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-JB reviewer gate PASS (2026-05-01). Ready for ADVANCE. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JA-1, CF-JA-2, CF-JB-1, CF-JB-2, CF-JB-3.**
+Current phase: **WS-JB merged via PR #20 (2026-05-01). Next slice: WS-JC strategy validation job. Carry-forwards open: CF-IC-1, CF-IC-2, CF-JB-1, CF-JB-2, CF-JB-3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -4764,7 +4764,8 @@ Autonomy tranche state after merge:
 - `WS-IB` merged
 - `WS-IC` merged
 - `WS-JA` merged
-- next implementation slice: `WS-JB`
+- `WS-JB` merged
+- next implementation slice: `WS-JC`
 
 Carry-forwards still open:
 - `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
@@ -4772,7 +4773,7 @@ Carry-forwards still open:
 - `CF-IC-3` — resolved in `WS-JA` by explicit `work-classifier.test.ts` coverage for `consecutive_primary_failures` and `maintenance_work`
 
 Next process step:
-- `STEWARD2 IMPLEMENT WS-JB`
+- `STEWARD2 IMPLEMENT WS-JC`
 
 ## WS-JB implementation gate (2026-05-01)
 
@@ -4902,6 +4903,32 @@ Remaining open carry-forwards (all non-blocking): CF-JB-1, CF-JB-2, CF-JB-3. No 
 
 Next process step:
 - `STEWARD2 ADVANCE WS-JB`
+
+## WS-JB post-merge status (2026-05-01)
+
+Merge confirmed: PR `#20` merged `ws-jb` → `main`.
+
+WS-JB is now complete on `main`:
+- `src/steward/jobs/sleep-consolidation.ts`
+- `src/steward/jobs/sleep-consolidation.test.ts`
+
+Autonomy tranche state after WS-JB merge:
+- `WS-IA` merged
+- `WS-IB` merged
+- `WS-IC` merged
+- `WS-JA` merged
+- `WS-JB` merged
+- next implementation slice: `WS-JC`
+
+Open carry-forwards:
+- `CF-IC-1` — resolve synthetic `taskId = flowId` before `WS-K` advancement gate
+- `CF-IC-2` — resolve/document duplicate seeded-path event emission before `WS-K`
+- `CF-JB-1` — dry-run archive path should return `null` instead of a non-written path
+- `CF-JB-2` — gate `job.sleep_consolidation.pruned` when `redactedEventCount === 0`
+- `CF-JB-3` — standalone `buildSleepConsolidationSummary()` should not silently return `knowledgeCount = 0` when `sessionKey` is omitted
+
+Next process step:
+- `STEWARD2 IMPLEMENT WS-JC`
 
 ## WS-JA implementation gate (2026-04-30)
 
