@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-A reconciled as already contained in `main` (2026-05-01). LM tranche next step: `LM-B`. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C.**
+Current phase: **LM-B implemented on branch `lm-b` (2026-05-01). Awaiting reviewer gate. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5460,3 +5460,59 @@ Open LM carry-forwards after LM-A:
 - `CF-LM-3` — key normalization contract belongs to `LM-B`
 - `CF-LM-1` — query lock scope must be resolved before `LM-C`
 - `CF-LM-2` — cross-process lock scope must be resolved before `LM-C`
+
+## LM-B implementation gate (2026-05-01)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\OLD_AI\core\lm_studio_manager.py`
+- `C:\ai_agent\PEQS\core\model_manager.py`
+
+Files changed:
+- `extensions/lmstudio/src/models.fetch.ts`
+- `extensions/lmstudio/src/models.test.ts`
+
+Host-owned invariant delivered in this slice:
+- the LM Studio provider layer now exposes explicit lifecycle primitives for:
+  - loaded-model discovery
+  - unload by instance id
+  - load/reload with explicit context target
+- provider helpers still do **not** own steward lifecycle policy or event persistence
+- `CF-LM-3` is resolved in the provider layer by normalizing and fuzzy-matching model keys against LM Studio key variants
+
+Behavior implemented:
+- `models.fetch.ts`
+  - adds `getLoadedLmstudioModels()` as explicit loaded-instance discovery
+  - returns normalized helper state:
+    - `modelKey`
+    - `instanceId`
+    - `contextLength`
+    - `kind`
+  - adds `unloadLmstudioModel()` for explicit unload by loaded instance id
+  - updates `ensureLmstudioModelLoaded()` to:
+    - match configured keys against longer LM Studio key variants
+    - unload a matching insufficient-context instance before reload
+  - keeps all logic provider-owned and stateless; no steward ledger/event ownership added here
+- `models.test.ts`
+  - adds focused coverage for:
+    - loaded-model discovery helper
+    - unload-by-instance-id helper
+    - fuzzy model-key normalization against longer LM Studio keys
+  - updates existing reload tests to prove the new explicit unload-before-reload helper path
+
+Focused acceptance evidence:
+- loaded-model discovery returns normalized loaded instance records
+- unload helper posts to `/api/v1/models/unload` with explicit `instance_id`
+- load helper still sends explicit `context_length`
+- configured `modelKey` can match longer returned LM Studio key variants without false reload/load churn
+
+Verification:
+- `corepack pnpm exec vitest run extensions/lmstudio/src/models.test.ts`
+  - PASS: `1` file, `12` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `LM-B` implementation
