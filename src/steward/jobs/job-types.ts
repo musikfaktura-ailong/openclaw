@@ -7,3 +7,4 @@ export const STEWARD_JOB_TYPES = [
 export type StewardJobType = (typeof STEWARD_JOB_TYPES)[number];
 
 export const DAILY_SELF_REVIEW_CADENCE_MS = 24 * 60 * 60 * 1000;
+export const SLEEP_CONSOLIDATION_CADENCE_MS = 24 * 60 * 60 * 1000;
