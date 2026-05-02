@@ -75,7 +75,19 @@ export type StewardEventKind =
   | "truth.candidate_decision"
   | "proof.accepted"
   | "proof.rejected"
-  | "novel_claim.flagged";
+  | "novel_claim.flagged"
+  | "lmstudio.lifecycle.lock_wait_started"
+  | "lmstudio.lifecycle.lock_acquired"
+  | "lmstudio.lifecycle.lock_released"
+  | "lmstudio.lifecycle.unload_started"
+  | "lmstudio.lifecycle.unload_finished"
+  | "lmstudio.lifecycle.load_started"
+  | "lmstudio.lifecycle.load_finished"
+  | "lmstudio.lifecycle.load_failed"
+  | "lmstudio.lifecycle.query_lock_wait_started"
+  | "lmstudio.lifecycle.query_lock_acquired"
+  | "lmstudio.lifecycle.query_lock_released"
+  | "lmstudio.lifecycle.context_mismatch_detected";
 
 export type StewardRuntimeStateRow = {
   sessionKey: string;

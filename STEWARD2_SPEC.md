@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-B merged via PR `#23` (2026-05-02). LM-C is now code-ready. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C/D.**
+Current phase: **LM-C implementation complete on branch `lm-c` (2026-05-02). Awaiting reviewer gate. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet fully wired through LM-C/D.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3370,6 +3370,7 @@ DB/runtime surfaces:
 Required persisted event kinds:
 - `lmstudio.lifecycle.lock_wait_started`
 - `lmstudio.lifecycle.lock_acquired`
+- `lmstudio.lifecycle.lock_released`
 - `lmstudio.lifecycle.unload_started`
 - `lmstudio.lifecycle.unload_finished`
 - `lmstudio.lifecycle.load_started`
@@ -3649,6 +3650,65 @@ LM-C is now code-ready with these clarified boundaries:
 
 Next process step:
 - `STEWARD2 IMPLEMENT LM-C`
+
+## LM-C implementation (2026-05-02)
+
+Implementer: Codex
+
+Files added:
+- `src/steward/lmstudio/lifecycle-events.ts`
+- `src/steward/lmstudio/lifecycle-bridge.ts`
+- `src/steward/lmstudio/lifecycle-bridge.test.ts`
+
+Files changed:
+- `src/steward/lmstudio/lifecycle-policy.ts`
+- `src/steward/db/runtime-schema.ts`
+
+Host-owned invariant delivered in this slice:
+- LM Studio lifecycle decisions are now executed through a steward-owned bridge instead of provider-only preload behavior
+- local lifecycle transitions and query admission are serialized with in-process steward locks
+- lifecycle state changes now persist steward event-ledger evidence
+
+Behavior implemented:
+- `lifecycle-events.ts`
+  - adds steward-owned LM Studio event persistence helper
+  - resolves `sessionKey` to steward session/flow context before writing ledger events
+- `lifecycle-bridge.ts`
+  - adds steward-owned `ensureStewardLmstudioLifecycle()`:
+    - true remote bypass with no LM Studio helper or lock churn
+    - lifecycle/load lock ownership for local LM Studio selections
+    - unload-before-switch ordering
+    - context-mismatch detection before reload
+    - explicit `load_failed` event on load error
+    - guaranteed lifecycle lock release event in `finally`
+  - adds steward-owned `withStewardLmstudioQueryLock()`:
+    - local inference admission serialized with an in-process query lock
+    - remote and embedding paths bypass the query lock
+- `lifecycle-policy.ts`
+  - normalizes returned model keys to lowercase after stripping `lmstudio/`
+  - closes the mixed-case planner mismatch before the bridge starts consuming it
+- `runtime-schema.ts`
+  - adds typed LM Studio lifecycle event kinds for the new ledger path
+
+Focused acceptance evidence:
+- unload-before-switch order is enforced and persisted
+- insufficient-context reload emits `context_mismatch_detected`
+- lifecycle load failure still emits `lock_released`
+- query lock emits wait/acquired/released around local inference admission
+- remote models bypass lifecycle helpers and lifecycle events entirely
+
+Verification:
+- `corepack pnpm exec vitest run src/steward/lmstudio/lifecycle-policy.test.ts src/steward/lmstudio/lifecycle-bridge.test.ts`
+  - PASS
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `LM-C` implementation
+
+Next process step:
+- reviewer gate on `LM-C`
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 
 Deployment testing must not continue under the assumption that Steward2 is already a real steward just because the truth/proof/consequence/mission modules exist.
