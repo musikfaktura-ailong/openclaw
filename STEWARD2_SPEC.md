@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-A reconciled as already contained in `main` (2026-05-01). LM tranche next step: `LM-B`. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C.**
+Current phase: **LM-B reviewer findings resolved on branch `lm-b` (2026-05-02). Ready for ADVANCE. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5460,3 +5460,111 @@ Open LM carry-forwards after LM-A:
 - `CF-LM-3` — key normalization contract belongs to `LM-B`
 - `CF-LM-1` — query lock scope must be resolved before `LM-C`
 - `CF-LM-2` — cross-process lock scope must be resolved before `LM-C`
+
+## LM-B implementation gate (2026-05-01)
+
+Implementer: Codex
+
+Donor reviewed before implementation:
+- `C:\ai_agent\OLD_AI\core\lm_studio_manager.py`
+- `C:\ai_agent\PEQS\core\model_manager.py`
+
+Files changed:
+- `extensions/lmstudio/src/models.fetch.ts`
+- `extensions/lmstudio/src/models.test.ts`
+
+Host-owned invariant delivered in this slice:
+- the LM Studio provider layer now exposes explicit lifecycle primitives for:
+  - loaded-model discovery
+  - unload by instance id
+  - load/reload with explicit context target
+- provider helpers still do **not** own steward lifecycle policy or event persistence
+- `CF-LM-3` is resolved in the provider layer by normalizing and fuzzy-matching model keys against LM Studio key variants
+
+Behavior implemented:
+- `models.fetch.ts`
+  - adds `getLoadedLmstudioModels()` as explicit loaded-instance discovery
+  - returns normalized helper state:
+    - `modelKey`
+    - `instanceId`
+    - `contextLength`
+    - `kind`
+  - adds `unloadLmstudioModel()` for explicit unload by loaded instance id
+  - updates `ensureLmstudioModelLoaded()` to:
+    - match configured keys against longer LM Studio key variants
+    - unload a matching insufficient-context instance before reload
+  - keeps all logic provider-owned and stateless; no steward ledger/event ownership added here
+- `models.test.ts`
+  - adds focused coverage for:
+    - loaded-model discovery helper
+    - unload-by-instance-id helper
+    - fuzzy model-key normalization against longer LM Studio keys
+  - updates existing reload tests to prove the new explicit unload-before-reload helper path
+
+Focused acceptance evidence:
+- loaded-model discovery returns normalized loaded instance records
+- unload helper posts to `/api/v1/models/unload` with explicit `instance_id`
+- load helper still sends explicit `context_length`
+- configured `modelKey` can match longer returned LM Studio key variants without false reload/load churn
+
+Verification:
+- `corepack pnpm exec vitest run extensions/lmstudio/src/models.test.ts`
+  - PASS: `1` file, `12` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `LM-B` implementation
+
+## LM-B post-review fixes (2026-05-02)
+
+Codex resolved all four reviewer carry-forwards on `lm-b` before advancement:
+
+- `CF-LM-B-1` fixed in `extensions/lmstudio/src/models.fetch.ts`
+  - `normalizeModelKey()` now lowercases the returned normalized key
+  - mixed-case LM Studio keys no longer fail comparison by casing alone
+- `CF-LM-B-2` fixed in `extensions/lmstudio/src/models.fetch.ts`
+  - `ensureLmstudioModelLoaded()` now unloads all loaded instances for the matching model before reload
+  - removes the orphan-instance assumption from the helper path
+- `CF-LM-B-3` fixed in `extensions/lmstudio/src/models.fetch.ts`
+  - `modelKeysMatch()` no longer accepts arbitrary short configured prefixes
+  - suffix matching is now limited to detailed model stems rather than one-token family prefixes
+- `CF-LM-B-4` fixed in `extensions/lmstudio/src/models.test.ts`
+  - added explicit unreachable-host throw-path coverage for `getLoadedLmstudioModels()`
+
+Additional verification after the fixes:
+- `corepack pnpm exec vitest run extensions/lmstudio/src/models.test.ts`
+  - PASS: `1` file, `15` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Result:
+- `LM-B` is now advance-ready with no open `LM-B` carry-forwards
+
+## LM-B reviewer gate (2026-05-02)
+
+Reviewer: Claude
+
+Verdict: **PASS**
+
+CF-LM-3 resolved: `normalizeModelKey()` strips `lmstudio/` prefix; `modelKeysMatch()` applies bidirectional prefix match (`requested === loaded || requested.startsWith(loaded) || loaded.startsWith(requested)`). Test confirms configured `"qwen3-8b-instruct"` matches LM Studio key `"lmstudio/qwen3-8b-instruct-mlx-4bit"` with no reload churn.
+
+Findings:
+
+1. Loaded-model discovery correct — normalized `{modelKey, instanceId, contextLength, kind}` returned per loaded instance. Throws on unreachable/HTTP ≥400 (intentional contract vs `discoverLmstudioModels` which returns `[]`). Test covers `lmstudio/`-prefixed key and embedding kind.
+2. Unload by instance ID correct — POSTs `{instance_id}` to `/api/v1/models/unload`. Silent no-op on null/empty instanceId (correct for unloaded model). Error on `status="error"` wire response.
+3. Explicit context-target load correct — `contextLengthForLoad = min(requestedContextLength ?? DEFAULT, advertisedContextLimit)`. Skip-if-sufficient gate. Three tests cover explicit, clamped, and default paths.
+4. No steward event/ledger ownership added — provider layer is stateless. Confirmed.
+5. 12/12 tests pass.
+
+Carry-forwards added:
+
+- `CF-LM-B-1` — `normalizeModelKey()` does not fully lowercase the returned string — `.toLowerCase()` is used only for the `"lmstudio/"` prefix check, not applied to the returned key. Mixed-case LM Studio keys would fail `modelKeysMatch` comparisons. Low risk in practice; fix before LM-C or LM bridge wiring.
+- `CF-LM-B-2` — `ensureLmstudioModelLoaded` unloads only `loaded_instances[0]` before reload. Implicit single-instance assumption; orphan instances possible if multiple are loaded. Non-blocking.
+- `CF-LM-B-3` — `modelKeysMatch` bidirectional prefix could produce false matches on short configured keys sharing a prefix with multiple models (e.g., `"qwen"` matches any `"qwen*"`). Acceptable for typical usage but the assumption is implicit.
+- `CF-LM-B-4` — No test for `getLoadedLmstudioModels` throw path on unreachable host. The `reachable: false` → throw contract is the key behavioral difference from `discoverLmstudioModels` and should be pinned.
+
+Next process step:
+- `STEWARD2 ADVANCE LM-B`

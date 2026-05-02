@@ -4,7 +4,12 @@ import {
 } from "openclaw/plugin-sdk/provider-setup";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LMSTUDIO_DEFAULT_LOAD_CONTEXT_LENGTH } from "./defaults.js";
-import { discoverLmstudioModels, ensureLmstudioModelLoaded } from "./models.fetch.js";
+import {
+  discoverLmstudioModels,
+  ensureLmstudioModelLoaded,
+  getLoadedLmstudioModels,
+  unloadLmstudioModel,
+} from "./models.fetch.js";
 import {
   resolveLmstudioInferenceBase,
   resolveLmstudioReasoningCapability,
@@ -199,6 +204,13 @@ describe("lmstudio-models", () => {
           requestInit: init,
         };
       }
+      if (String(url).endsWith("/api/v1/models/unload")) {
+        return {
+          ok: true,
+          json: async () => ({ status: "unloaded" }),
+          requestInit: init,
+        };
+      }
       throw new Error(`Unexpected fetch URL: ${String(url)}`);
     });
     vi.stubGlobal("fetch", asFetch(fetchMock));
@@ -211,12 +223,99 @@ describe("lmstudio-models", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const loadCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/models/load"));
     expect(loadCall).toBeDefined();
+    const unloadCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).endsWith("/models/unload"),
+    );
+    expect(unloadCall).toBeDefined();
     const loadInit = loadCall?.[1] as RequestInit;
     const loadBody = parseJsonRequestBody(loadInit) as { context_length: number };
     expect(loadBody.context_length).toBe(8192);
+  });
+
+  it("discovers loaded LM Studio instances in normalized helper form", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL) => ({
+      ok: true,
+      json: async () => ({
+        models: [
+          {
+            type: "llm",
+            key: "lmstudio/qwen3-8b-instruct",
+            loaded_instances: [{ id: "qwen3-8b-instruct-mlx", config: { context_length: 16384 } }],
+          },
+          {
+            type: "embedding",
+            key: "nomic-embed-text-v1.5",
+            loaded_instances: [{ id: "embed-inst-1", config: { context_length: 4096 } }],
+          },
+        ],
+      }),
+    }));
+
+    await expect(
+      getLoadedLmstudioModels({
+        baseUrl: "http://localhost:1234/v1",
+        fetchImpl: asFetch(fetchMock),
+      }),
+    ).resolves.toEqual([
+      {
+        modelKey: "qwen3-8b-instruct",
+        instanceId: "qwen3-8b-instruct-mlx",
+        contextLength: 16384,
+        kind: "inference",
+      },
+      {
+        modelKey: "nomic-embed-text-v1.5",
+        instanceId: "embed-inst-1",
+        contextLength: 4096,
+        kind: "embedding",
+      },
+    ]);
+  });
+
+  it("throws when loaded-model discovery cannot reach LM Studio", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("connection refused");
+    });
+
+    await expect(
+      getLoadedLmstudioModels({
+        baseUrl: "http://localhost:1234/v1",
+        fetchImpl: asFetch(fetchMock),
+      }),
+    ).rejects.toThrow("LM Studio model discovery failed: Error: connection refused");
+  });
+
+  it("unloads a loaded model by instance id", async () => {
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/api/v1/models/unload")) {
+        return {
+          ok: true,
+          json: async () => ({ status: "unloaded" }),
+          requestInit: init,
+        };
+      }
+      throw new Error(`Unexpected fetch URL: ${String(url)}`);
+    });
+
+    await expect(
+      unloadLmstudioModel({
+        baseUrl: "http://localhost:1234/v1",
+        instanceId: "inst-qwen-1",
+        fetchImpl: asFetch(fetchMock),
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:1234/api/v1/models/unload",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ instance_id: "inst-qwen-1" }),
+      }),
+    );
   });
 
   it("reloads model to the clamped default target when already loaded below the default window", async () => {
@@ -243,6 +342,13 @@ describe("lmstudio-models", () => {
           requestInit: init,
         };
       }
+      if (String(url).endsWith("/api/v1/models/unload")) {
+        return {
+          ok: true,
+          json: async () => ({ status: "unloaded" }),
+          requestInit: init,
+        };
+      }
       throw new Error(`Unexpected fetch URL: ${String(url)}`);
     });
     vi.stubGlobal("fetch", asFetch(fetchMock));
@@ -254,12 +360,72 @@ describe("lmstudio-models", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const loadCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/models/load"));
     expect(loadCall).toBeDefined();
+    const unloadCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).endsWith("/models/unload"),
+    );
+    expect(unloadCall).toBeDefined();
     const loadInit = loadCall?.[1] as RequestInit;
     const loadBody = parseJsonRequestBody(loadInit) as { context_length: number };
     expect(loadBody.context_length).toBe(32768);
+  });
+
+  it("unloads all loaded instances for a matching model before reload", async () => {
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/api/v1/models")) {
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                type: "llm",
+                key: "Qwen3-8B-Instruct",
+                max_context_length: 32768,
+                loaded_instances: [
+                  { id: "inst-1", config: { context_length: 2048 } },
+                  { id: "inst-2", config: { context_length: 4096 } },
+                ],
+              },
+            ],
+          }),
+        };
+      }
+      if (String(url).endsWith("/api/v1/models/unload")) {
+        return {
+          ok: true,
+          json: async () => ({ status: "unloaded" }),
+          requestInit: init,
+        };
+      }
+      if (String(url).endsWith("/api/v1/models/load")) {
+        return {
+          ok: true,
+          json: async () => ({ status: "loaded" }),
+          requestInit: init,
+        };
+      }
+      throw new Error(`Unexpected fetch URL: ${String(url)}`);
+    });
+    vi.stubGlobal("fetch", asFetch(fetchMock));
+
+    await expect(
+      ensureLmstudioModelLoaded({
+        baseUrl: "http://localhost:1234/v1",
+        modelKey: "qwen3-8b-instruct",
+        requestedContextLength: 8192,
+      }),
+    ).resolves.toBeUndefined();
+
+    const unloadCalls = fetchMock.mock.calls.filter((call) =>
+      String(call[0]).endsWith("/api/v1/models/unload"),
+    );
+    expect(unloadCalls).toHaveLength(2);
+    expect(unloadCalls.map((call) => parseJsonRequestBody(call[1] as RequestInit))).toEqual([
+      { instance_id: "inst-1" },
+      { instance_id: "inst-2" },
+    ]);
   });
 
   it("loads model with clamped context length and merged headers", async () => {
@@ -320,6 +486,77 @@ describe("lmstudio-models", () => {
     const loadInit = loadCall![1] as RequestInit;
     const loadBody = parseJsonRequestBody(loadInit) as { context_length: number };
     expect(loadBody.context_length).not.toBe(LMSTUDIO_DEFAULT_LOAD_CONTEXT_LENGTH);
+  });
+
+  it("matches configured model key against longer loaded LM Studio key variants", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL) => ({
+      ok: true,
+      json: async () => ({
+        models: [
+          {
+            type: "llm",
+            key: "lmstudio/qwen3-8b-instruct-mlx-4bit",
+            max_context_length: 32768,
+            loaded_instances: [{ id: "inst-1", config: { context_length: 16384 } }],
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal("fetch", asFetch(fetchMock));
+
+    await expect(
+      ensureLmstudioModelLoaded({
+        baseUrl: "http://localhost:1234/v1",
+        modelKey: "qwen3-8b-instruct",
+        requestedContextLength: 8192,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const calledUrls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(calledUrls).not.toContain("http://localhost:1234/api/v1/models/load");
+    expect(calledUrls).not.toContain("http://localhost:1234/api/v1/models/unload");
+  });
+
+  it("does not treat short configured prefixes as a model match", async () => {
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/api/v1/models")) {
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                type: "llm",
+                key: "qwen3-8b-instruct-mlx-4bit",
+                max_context_length: 32768,
+                loaded_instances: [{ id: "inst-1", config: { context_length: 16384 } }],
+              },
+            ],
+          }),
+        };
+      }
+      if (String(url).endsWith("/api/v1/models/load")) {
+        return {
+          ok: true,
+          json: async () => ({ status: "loaded" }),
+          requestInit: init,
+        };
+      }
+      throw new Error(`Unexpected fetch URL: ${String(url)}`);
+    });
+    vi.stubGlobal("fetch", asFetch(fetchMock));
+
+    await expect(
+      ensureLmstudioModelLoaded({
+        baseUrl: "http://localhost:1234/v1",
+        modelKey: "qwen3",
+        requestedContextLength: 8192,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/v1/models/load"))).toBe(
+      true,
+    );
   });
 
   it("uses requested context length when provided for model load", async () => {

@@ -18,6 +18,10 @@ type LmstudioLoadResponse = {
   status?: string;
 };
 
+type LmstudioUnloadResponse = {
+  status?: string;
+};
+
 export type FetchLmstudioModelsResult = {
   reachable: boolean;
   status?: number;
@@ -25,9 +29,64 @@ export type FetchLmstudioModelsResult = {
   error?: unknown;
 };
 
+export type LoadedLmstudioModelState = {
+  modelKey: string;
+  instanceId: string;
+  contextLength?: number;
+  kind: "inference" | "embedding";
+};
+
 type LmstudioModelsResponseWire = {
   models?: LmstudioModelWire[];
 };
+
+function normalizeModelKey(modelId: string | null | undefined): string {
+  const trimmed = (modelId ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  const withoutPrefix = trimmed.toLowerCase().startsWith("lmstudio/")
+    ? trimmed.slice("lmstudio/".length).trim()
+    : trimmed;
+  return withoutPrefix.toLowerCase();
+}
+
+function modelKeysMatch(requestedModelKey: string, entryKey: string | null | undefined): boolean {
+  const requested = normalizeModelKey(requestedModelKey);
+  const loaded = normalizeModelKey(entryKey);
+  if (!requested || !loaded) {
+    return false;
+  }
+  const requestedSegments = requested.split(/[-_]+/).filter((segment) => segment.length > 0);
+  return (
+    requested === loaded ||
+    (requestedSegments.length >= 3 && loaded.startsWith(`${requested}-`))
+  );
+}
+
+function mapLoadedLmstudioModelStates(models: readonly LmstudioModelWire[]): LoadedLmstudioModelState[] {
+  const loadedStates: LoadedLmstudioModelState[] = [];
+  for (const entry of models) {
+    const modelKey = normalizeModelKey(entry.key);
+    if (!modelKey) {
+      continue;
+    }
+    const loadedInstances = Array.isArray(entry.loaded_instances) ? entry.loaded_instances : [];
+    for (const instance of loadedInstances) {
+      const instanceId = instance?.id?.trim();
+      if (!instanceId) {
+        continue;
+      }
+      loadedStates.push({
+        modelKey,
+        instanceId,
+        contextLength: resolveLoadedContextWindow({ loaded_instances: [instance] }) ?? undefined,
+        kind: entry.type === "embedding" ? "embedding" : "inference",
+      });
+    }
+  }
+  return loadedStates;
+}
 
 type DiscoverLmstudioModelsParams = {
   baseUrl: string;
@@ -119,6 +178,25 @@ export async function fetchLmstudioModels(params: {
   }
 }
 
+/** Returns the currently loaded LM Studio model instances in a bridge-friendly normalized shape. */
+export async function getLoadedLmstudioModels(params: {
+  baseUrl?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  ssrfPolicy?: SsrFPolicy;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}): Promise<LoadedLmstudioModelState[]> {
+  const fetched = await fetchLmstudioModels(params);
+  if (!fetched.reachable) {
+    throw new Error(`LM Studio model discovery failed: ${String(fetched.error)}`);
+  }
+  if (fetched.status !== undefined && fetched.status >= 400) {
+    throw new Error(`LM Studio model discovery failed (${fetched.status})`);
+  }
+  return mapLoadedLmstudioModelStates(fetched.models);
+}
+
 /** Discovers LLM models from LM Studio and maps them to OpenClaw model definitions. */
 export async function discoverLmstudioModels(
   params: DiscoverLmstudioModelsParams,
@@ -205,7 +283,7 @@ export async function ensureLmstudioModelLoaded(params: {
   if (preflight.status !== undefined && preflight.status >= 400) {
     throw new Error(`LM Studio model discovery failed (${preflight.status})`);
   }
-  const matchingModel = preflight.models.find((entry) => entry.key?.trim() === modelKey);
+  const matchingModel = preflight.models.find((entry) => modelKeysMatch(modelKey, entry.key));
   const loadedContextWindow = matchingModel ? resolveLoadedContextWindow(matchingModel) : null;
   const advertisedContextLimit =
     matchingModel?.max_context_length !== undefined &&
@@ -228,6 +306,23 @@ export async function ensureLmstudioModelLoaded(params: {
         );
   if (loadedContextWindow !== null && loadedContextWindow >= contextLengthForLoad) {
     return;
+  }
+
+  const loadedInstances = Array.isArray(matchingModel?.loaded_instances)
+    ? matchingModel.loaded_instances
+    : [];
+  for (const instance of loadedInstances) {
+    await unloadLmstudioModel({
+      baseUrl,
+      apiKey: params.apiKey,
+      headers: params.headers,
+      ssrfPolicy: params.ssrfPolicy,
+      instanceId: instance?.id,
+      timeoutMs,
+      fetchImpl: params.fetchImpl,
+    }).catch((error) => {
+      throw new Error(`LM Studio model unload failed before reload: ${String(error)}`);
+    });
   }
 
   const { response, release } = await fetchLmstudioEndpoint({
@@ -258,6 +353,56 @@ export async function ensureLmstudioModelLoaded(params: {
     const payload = (await response.json()) as LmstudioLoadResponse;
     if (typeof payload.status === "string" && payload.status.toLowerCase() !== "loaded") {
       throw new Error(`LM Studio model load returned unexpected status: ${payload.status}`);
+    }
+  } finally {
+    await release();
+  }
+}
+
+/** Unloads one LM Studio model instance by its loaded instance id. */
+export async function unloadLmstudioModel(params: {
+  baseUrl?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  ssrfPolicy?: SsrFPolicy;
+  instanceId?: string | null;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const instanceId = params.instanceId?.trim();
+  if (!instanceId) {
+    return;
+  }
+  const timeoutMs = params.timeoutMs ?? 30_000;
+  const baseUrl = resolveLmstudioServerBase(params.baseUrl);
+  const { response, release } = await fetchLmstudioEndpoint({
+    url: `${baseUrl}/api/v1/models/unload`,
+    init: {
+      method: "POST",
+      headers: buildLmstudioAuthHeaders({
+        apiKey: params.apiKey,
+        headers: params.headers,
+        json: true,
+      }),
+      body: JSON.stringify({
+        instance_id: instanceId,
+      }),
+    },
+    timeoutMs,
+    fetchImpl: params.fetchImpl,
+    ssrfPolicy: params.ssrfPolicy,
+    auditContext: "lmstudio-model-unload",
+  });
+  try {
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `LM Studio model unload failed (${response.status})${body ? `: ${body}` : ""}`,
+      );
+    }
+    const payload = (await response.json()) as LmstudioUnloadResponse;
+    if (typeof payload.status === "string" && payload.status.toLowerCase() === "error") {
+      throw new Error(`LM Studio model unload returned error status: ${payload.status}`);
     }
   } finally {
     await release();
