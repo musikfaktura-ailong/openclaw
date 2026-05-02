@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-B reviewer findings resolved on branch `lm-b` (2026-05-02). Ready for ADVANCE. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C.**
+Current phase: **LM-B merged via PR `#23` (2026-05-02). LM-C is now code-ready. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet wired through LM-C/D.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3599,6 +3599,56 @@ Carry-forwards (non-blocking on LM-A and LM-B, must be resolved before LM-C open
 
 - **CF-LM-1: Query lock scope** — spec lists query lock events (`query_lock_wait_started/acquired/released`) but does not assign query lock ownership to a slice. LM-C acceptance criteria must either include the query lock or explicitly defer it to a future LM-E slice. In PEQS the query lock wraps inference, not load — distinguish this before LM-C starts.
 - **CF-LM-2: Cross-process lock scope** — PEQS used file-based cross-process locks because Python could spawn multiple processes. Steward2 is a single Node.js event loop. Before LM-C, record a decision: in-process async serialization sufficient, or cross-process file lock needed? If a separate preload worker ever runs alongside the main process, file locking is needed; otherwise in-process is simpler and sufficient.
+
+## LM-B post-merge reconciliation + LM-C blocker resolution (2026-05-02)
+
+Merge confirmed: PR `#23` merged `lm-b` → `main`.
+
+LM lifecycle tranche state after LM-B merge:
+- `LM-A` already contained in `main`
+- `LM-B` merged
+- `LM-C` next
+- `LM-D` after `LM-C`
+
+Resolved blocker decisions for LM-C:
+
+- `CF-LM-1` — **RESOLVED**
+  - query lock ownership belongs to **LM-C**
+  - rationale:
+    - PEQS query lock wraps inference, not load
+    - LM-B is provider-helper only and must stay stateless
+    - LM-D is the embedded-runner seam, but the actual lock/event policy must exist one layer below it in the steward lifecycle bridge
+  - consequence for LM-C scope:
+    - LM-C must implement steward-owned query lock acquire/release around lifecycle-bridged local LM Studio inference admission
+    - LM-C acceptance must include query-lock event evidence:
+      - `query_lock_wait_started`
+      - `query_lock_acquired`
+      - `query_lock_released`
+    - LM-D may call into that seam, but must not invent a second lock contract
+
+- `CF-LM-2` — **RESOLVED**
+  - current Steward2 deployment uses **in-process async serialization**, not cross-process file locking
+  - rationale:
+    - current runtime is one Node.js gateway process with one event loop
+    - no separate preload worker or multi-process LM Studio steward coordinator exists in this tranche
+    - adding file-lock complexity now would be speculative and outside the real current deployment shape
+  - constraint:
+    - if a later deployment introduces:
+      - multiple Node gateway processes
+      - a dedicated LM preload worker
+      - or another process that can race LM Studio lifecycle transitions
+    - then a future `LM-E` must add cross-process lock ownership explicitly
+  - consequence for LM-C scope:
+    - LM-C should use steward-owned in-process async mutex/serialization only
+    - LM-C must not claim cross-process safety
+
+LM-C is now code-ready with these clarified boundaries:
+- provider helper ownership stays in `LM-B`
+- steward lifecycle bridge, ledger events, load lock, and query lock ownership start in `LM-C`
+- embedded runner seam wiring stays in `LM-D`
+
+Next process step:
+- `STEWARD2 IMPLEMENT LM-C`
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 
 Deployment testing must not continue under the assumption that Steward2 is already a real steward just because the truth/proof/consequence/mission modules exist.
