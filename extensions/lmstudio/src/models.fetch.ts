@@ -45,9 +45,10 @@ function normalizeModelKey(modelId: string | null | undefined): string {
   if (!trimmed) {
     return "";
   }
-  return trimmed.toLowerCase().startsWith("lmstudio/")
+  const withoutPrefix = trimmed.toLowerCase().startsWith("lmstudio/")
     ? trimmed.slice("lmstudio/".length).trim()
     : trimmed;
+  return withoutPrefix.toLowerCase();
 }
 
 function modelKeysMatch(requestedModelKey: string, entryKey: string | null | undefined): boolean {
@@ -56,7 +57,11 @@ function modelKeysMatch(requestedModelKey: string, entryKey: string | null | und
   if (!requested || !loaded) {
     return false;
   }
-  return requested === loaded || requested.startsWith(loaded) || loaded.startsWith(requested);
+  const requestedSegments = requested.split(/[-_]+/).filter((segment) => segment.length > 0);
+  return (
+    requested === loaded ||
+    (requestedSegments.length >= 3 && loaded.startsWith(`${requested}-`))
+  );
 }
 
 function mapLoadedLmstudioModelStates(models: readonly LmstudioModelWire[]): LoadedLmstudioModelState[] {
@@ -303,17 +308,22 @@ export async function ensureLmstudioModelLoaded(params: {
     return;
   }
 
-  await unloadLmstudioModel({
-    baseUrl,
-    apiKey: params.apiKey,
-    headers: params.headers,
-    ssrfPolicy: params.ssrfPolicy,
-    instanceId: matchingModel?.loaded_instances?.[0]?.id,
-    timeoutMs,
-    fetchImpl: params.fetchImpl,
-  }).catch((error) => {
-    throw new Error(`LM Studio model unload failed before reload: ${String(error)}`);
-  });
+  const loadedInstances = Array.isArray(matchingModel?.loaded_instances)
+    ? matchingModel.loaded_instances
+    : [];
+  for (const instance of loadedInstances) {
+    await unloadLmstudioModel({
+      baseUrl,
+      apiKey: params.apiKey,
+      headers: params.headers,
+      ssrfPolicy: params.ssrfPolicy,
+      instanceId: instance?.id,
+      timeoutMs,
+      fetchImpl: params.fetchImpl,
+    }).catch((error) => {
+      throw new Error(`LM Studio model unload failed before reload: ${String(error)}`);
+    });
+  }
 
   const { response, release } = await fetchLmstudioEndpoint({
     url: `${baseUrl}/api/v1/models/load`,
