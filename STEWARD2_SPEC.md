@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-D merged via PR `#25` (2026-05-03). LM lifecycle tranche is closed. Deployment-readiness: evaluate next. Non-blocking carry-forwards: CF-JB-1, CF-JB-2, CF-JB-3. Next step: tranche-close/deployment-readiness spec reconciliation.**
+Current phase: **LM-D merged via PR `#25` (2026-05-03). LM lifecycle tranche is closed. Deployment-readiness: NO. Remaining non-blocking carry-forwards: CF-JB-1, CF-JB-2, CF-JB-3. Next step: open startup-readiness wiring slice.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5704,14 +5704,11 @@ Deployment-readiness decision:
 - **NO, Steward2 is not yet deployment-ready for real steward evaluation**
 
 Why deployment-readiness is still blocked:
-- LM Studio lifecycle tranche is not complete on `main`
-  - `LM-A` is already contained in `main` and does not require a separate merge
-  - `LM-B`, `LM-C`, and `LM-D` are not yet implemented/merged
 - `WS-IB` / `WS-K` startup readiness still treats:
   - `truthCoreReady`
   - `lmStudioLifecycleReady`
   as caller-defaulted `true` values
-- the spec already marked LM lifecycle ownership as a prerequisite before deployment testing resumes
+- LM lifecycle ownership is now complete on `main`, but that only makes the readiness flag *wireable*; it does not make the boot snapshot truthful yet
 
 Non-blocking carry-forwards that remain outside deployment readiness:
 - `CF-JB-1`
@@ -5720,10 +5717,60 @@ Non-blocking carry-forwards that remain outside deployment readiness:
 
 Conclusion:
 - autonomous steward behavior is now structurally present on `main`
-- deployment testing is still paused pending LM lifecycle completion and real startup readiness wiring
+- LM Studio lifecycle ownership is now structurally present on `main`
+- deployment testing is still paused pending real startup readiness wiring
 
 Next process step:
-- `STEWARD2 IMPLEMENT LM-B`
+- `STEWARD2 SPEC-Q: open startup-readiness wiring slice`
+
+## LM-D post-merge reconciliation + deployment-readiness decision (2026-05-03)
+
+Merge confirmed: PR `#25` merged `lm-d` → `main`.
+
+LM lifecycle tranche state after LM-D merge:
+- `LM-A`: already contained on `main`
+- `LM-B`: merged PR `#23`
+- `LM-C`: merged PR `#24`
+- `LM-D`: merged PR `#25`
+
+Decision:
+- LM Studio lifecycle tranche is **closed**
+- deployment-readiness is **NO**
+
+Why deployment-readiness is still blocked:
+- `recordAutonomyBootSequence()` still builds boot snapshots with:
+  - `truthCoreReady: params.truthCoreReady ?? true`
+  - `lmStudioLifecycleReady: params.lmStudioLifecycleReady ?? true`
+- `runAutonomyBridgeCycle()` still forwards those readiness values from caller params instead of deriving them from real subsystem state
+- that means the boot evidence can still claim readiness without proving:
+  - truth core is actually available
+  - LM Studio lifecycle seam is actually available
+
+What this means:
+- the steward can now *own* local LM Studio lifecycle transitions at runtime
+- but startup readiness evidence is still not trustworthy enough for deployment evaluation
+
+New slice opened:
+- **RD-1 — startup readiness wiring**
+
+RD-1 scope:
+- wire real `truthCoreReady` derivation into the autonomy boot snapshot
+- wire real `lmStudioLifecycleReady` derivation into the autonomy boot snapshot
+- remove caller-defaulted `true` behavior from the deployment path
+- keep this slice limited to readiness truthfulness, not broader runtime redesign
+
+RD-1 acceptance:
+- boot record evidence on `main` must show readiness derived from real subsystem checks
+- failing readiness must produce a truthful boot snapshot without operator guesswork
+- a live/autonomy bridge test must prove the snapshot changes when readiness inputs change
+
+Non-blocking carry-forwards still outside deployment-readiness:
+- `CF-JB-1`
+- `CF-JB-2`
+- `CF-JB-3`
+
+Next process step:
+- `STEWARD2 IMPLEMENT RD-1`
 
 ## LM-A post-advance reconciliation (2026-05-01)
 
