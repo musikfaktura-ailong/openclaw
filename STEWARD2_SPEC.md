@@ -3608,7 +3608,7 @@ Merge confirmed: PR `#23` merged `lm-b` → `main`.
 LM lifecycle tranche state after LM-B merge:
 - `LM-A` already contained in `main`
 - `LM-B` merged
-- `LM-C` next
+- `LM-C` reviewed — PASS (2026-05-03); advance-ready
 - `LM-D` after `LM-C`
 
 Resolved blocker decisions for LM-C:
@@ -3709,6 +3709,60 @@ Carry-forward:
 
 Next process step:
 - reviewer gate on `LM-C`
+
+## LM-C reviewer gate (2026-05-03)
+
+Reviewer: Claude (Sonnet 4.6)
+
+**PASS**
+
+### Findings
+
+**True remote bypass — PASS**
+`ensureStewardLmstudioLifecycle()` calls `planLmstudioLifecycle()` with empty `loadedModels` before acquiring any lock. If `targetKind === "remote_stateless"` (non-lmstudio provider), returns `{ bypassed: true }` immediately. No `getLoadedLmstudioModels`, `unloadLmstudioModel`, `ensureLmstudioModelLoaded`, or lock acquisition occurs. Test coverage confirms no helper calls and zero lifecycle events emitted.
+
+**Steward-owned lifecycle lock — PASS**
+Per-`baseUrl` named async mutex (`lifecycleLocks` Map) serializes concurrent `ensureStewardLmstudioLifecycle()` calls for the same server. `lock_wait_started` is emitted before entering; `lock_acquired` is emitted inside the critical section; `lock_released` is emitted in `finally` unconditionally — including on load failure. Correct chained-promise lock implementation (`createAsyncLock`): each entry awaits the previous promise and resolves the gate in `finally`.
+
+**Steward-owned query lock — PASS**
+`withStewardLmstudioQueryLock()` serializes local inference admission via a separate `queryLocks` Map keyed by `baseUrl`. Remote and embedding paths bypass it entirely (policy re-evaluated against empty `loadedModels` is sufficient to determine `local_lmstudio_inference`). Events `query_lock_wait_started / acquired / released` emitted in order and confirmed by test.
+
+**Unload-before-switch order — PASS**
+`resolveUnloadList()` augments the plan's `modelsToUnload` list with all same-target instances when `action === "unload_then_load"` (captures multi-instance context-mismatch case). Loop unloads each instance before `ensureLmstudioModelLoaded` is invoked. Test confirms `operations` array: `["unload:inst-primary", "load:deepseek-r1-distill-qwen-14b"]`.
+
+**Context-mismatch reload evidence — PASS**
+`isContextMismatch()` returns `true` when `action === "unload_then_load"` and `targetModelKey === loadedModel.modelKey` (same model, insufficient context). Emits `lmstudio.lifecycle.context_mismatch_detected` with full event data. Multi-instance mismatch test confirms both instances are unloaded (`["inst-small-a", "inst-small-b"]`) and reload is called with correct context length.
+
+**load_failed event + lock_released guarantee — PASS**
+Load error path: catches the `ensureLmstudioModelLoaded` throw, emits `load_failed` with serialized error, re-throws. `finally` block then unconditionally emits `lock_released`. Test confirms exact event sequence: `lock_wait_started → lock_acquired → load_started → load_failed → lock_released`.
+
+**lifecycle-policy.ts lowercase normalization (CF-LM-B-1 resolution) — PASS**
+`normalizeModelKey()` in `lifecycle-policy.ts` now does `.toLowerCase()` on the final returned value, not just the prefix check. `planLmstudioLifecycle()` normalizes `selection.modelId` to lowercase before returning `targetModelKey`. Test: `LMSTUDIO/Qwen/Qwen3-14B` → plan `action: "noop"`, `targetModelKey: "qwen/qwen3-14b"`.
+
+**lifecycle-events.ts ledger helper — PASS**
+`appendLmstudioLifecycleEvent()` silently no-ops when `sessionKey` is absent (safe for callers that don't have a session context). Resolves `sessionKey` → steward session → active flow ID before calling `appendStewardEvent`. `StewardLmstudioLifecycleEventKind` is typed via `Extract<StewardEventKind, 'lmstudio.lifecycle.${string}'>`.
+
+**Test coverage — PASS**
+6 focused tests covering: lowercase normalization, unload-before-switch + full event sequence, context-mismatch detection + multi-instance unload, load-failure + lock-released guarantee, query lock event sequence, and full remote bypass (no helpers, no events). 13/13 tests pass.
+
+### Carry-forwards
+
+None. CF-LM-B-1 is resolved by this slice.
+
+### Carry-forward status after LM-C
+
+- CF-IC-1: resolved by WS-K
+- CF-IC-2: resolved by WS-K
+- CF-IC-3: resolved by WS-JA
+- CF-JB-1: open (non-blocking) — no embedding-kind-aware load action in policy; future slice if embedding lifecycle is needed
+- CF-JB-2: open (non-blocking) — no cross-process serialization; LM-E scope
+- CF-JB-3: open (non-blocking) — `validationKnowledgeId: 0` on cooldown-reuse path; WS-JC scope
+- CF-LM-3: resolved by LM-B
+- CF-LM-B-1: resolved by LM-C
+
+Next process step:
+- `STEWARD2 HANDOFF LM-D` or next reviewer command
+
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 
 Deployment testing must not continue under the assumption that Steward2 is already a real steward just because the truth/proof/consequence/mission modules exist.
@@ -5682,3 +5736,23 @@ Current LM-B carry-forward state:
 
 Next process step:
 - `STEWARD2 ADVANCE LM-B`
+
+## LM-C reviewer gate summary (2026-05-03)
+
+Reviewer: Claude (Sonnet 4.6)
+
+Verdict: **PASS**
+
+All 6 focused tests pass (13 total across policy + bridge). All LM-C host-owned invariants confirmed structural:
+- True remote bypass: zero helper calls, zero events — confirmed
+- Lifecycle lock: per-baseUrl named async mutex; `lock_released` in `finally` unconditionally — confirmed
+- Query lock: separate `queryLocks` Map; remote/embedding bypass; events around admission — confirmed
+- Unload-before-switch: `resolveUnloadList()` captures multi-instance; loop before load call — confirmed
+- Context-mismatch detection: `isContextMismatch()` + `context_mismatch_detected` event — confirmed
+- load_failed event + guaranteed lock release on throw — confirmed
+- CF-LM-B-1 (lowercase normalization in policy): resolved — confirmed
+
+No new carry-forwards.
+
+Next process step:
+- `STEWARD2 ADVANCE LM-C`
