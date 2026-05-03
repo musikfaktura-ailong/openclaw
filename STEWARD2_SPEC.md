@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-C implementation complete on branch `lm-c` (2026-05-02). Awaiting reviewer gate. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet fully wired through LM-C/D.**
+Current phase: **LM-C merged via PR `#24` (2026-05-03). LM-D is now the next implementation slice. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet fully wired through LM-D.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3761,7 +3761,26 @@ None. CF-LM-B-1 is resolved by this slice.
 - CF-LM-B-1: resolved by LM-C
 
 Next process step:
-- `STEWARD2 HANDOFF LM-D` or next reviewer command
+- `STEWARD2 ADVANCE LM-C`
+
+## LM-C post-merge reconciliation (2026-05-03)
+
+Merge confirmed: PR `#24` merged `lm-c` → `main`.
+
+LM lifecycle tranche state after LM-C merge:
+- `LM-A` already contained in `main`
+- `LM-B` merged via PR `#23`
+- `LM-C` merged via PR `#24`
+- `LM-D` next
+
+Result:
+- steward-owned lifecycle bridge is now on `main`
+- steward-owned lifecycle/query lock events are now on `main`
+- provider helper normalization and unload semantics are already in place from `LM-B`
+- remaining lifecycle readiness gap is the embedded runner seam wiring in `LM-D`
+
+Next process step:
+- `STEWARD2 IMPLEMENT LM-D`
 
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 
