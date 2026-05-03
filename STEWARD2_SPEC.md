@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-C merged via PR `#24` (2026-05-03). LM-D is now the next implementation slice. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet fully wired through LM-D.**
+Current phase: **LM-D reviewed PASS (2026-05-03). Advance-ready. Deployment-readiness: NO — LM-D merge to `main` still pending. Non-blocking carry-forwards: CF-JB-1, CF-JB-2, CF-JB-3. Next step: STEWARD2 ADVANCE LM-D.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3609,7 +3609,7 @@ LM lifecycle tranche state after LM-B merge:
 - `LM-A` already contained in `main`
 - `LM-B` merged
 - `LM-C` reviewed — PASS (2026-05-03); advance-ready
-- `LM-D` after `LM-C`
+- `LM-D` reviewed — PASS (2026-05-03); advance-ready
 
 Resolved blocker decisions for LM-C:
 
@@ -3781,6 +3781,108 @@ Result:
 
 Next process step:
 - `STEWARD2 IMPLEMENT LM-D`
+
+## LM-D implementation (2026-05-03)
+
+Implementer: Codex
+
+Files changed:
+- `src/agents/pi-embedded-runner/run/attempt.ts`
+- `src/agents/pi-embedded-runner/run/attempt.test.ts`
+
+Host-owned invariant delivered in this slice:
+- the embedded runner's live inference seam can no longer reach local LM Studio without first passing through steward lifecycle authority
+
+Behavior implemented:
+- `attempt.ts`
+  - adds `wrapStreamFnWithStewardLmstudioLifecycle()`
+  - derives steward lifecycle selection from the live runtime model:
+    - `provider`
+    - `modelId`
+    - `baseUrl`
+    - `requestedContextLength`
+  - routes every embedded runner stream call through:
+    - `ensureStewardLmstudioLifecycle()`
+    - then `withStewardLmstudioQueryLock()`
+  - wires that wrapper directly onto `activeSession.agent.streamFn` immediately after `resolveEmbeddedAgentStreamFn()`
+  - leaves all later provider/text/tool-call wrappers intact and outside the lifecycle ownership seam
+- `attempt.test.ts`
+  - adds focused LM-D seam coverage for:
+    - local LM Studio run triggers lifecycle + query-lock events before stream execution
+    - remote/API run emits no LM Studio lifecycle events
+    - repeated turns on the same already-loaded LM Studio model do not churn unload/load
+
+Focused acceptance evidence:
+- local LM Studio run emits steward lifecycle events before stream execution
+- remote/API run bypasses LM Studio lifecycle events
+- repeated same-model turns reuse the loaded model without unload/load churn
+
+Verification:
+- `corepack pnpm exec vitest run src/agents/pi-embedded-runner/run/attempt.test.ts -t wrapStreamFnWithStewardLmstudioLifecycle`
+  - PASS: `1` file, `3` tests, `113` skipped
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `corepack pnpm exec vitest run src/agents/pi-embedded-runner/run/attempt.test.ts`
+  - not used for slice verification because one unrelated pre-existing Windows path-separator failure remains in `remapInjectedContextFilesToWorkspace`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `LM-D` implementation
+
+Next process step:
+- reviewer gate on `LM-D`
+
+## LM-D reviewer gate (2026-05-03)
+
+Reviewer: Claude (Sonnet 4.6)
+
+**PASS**
+
+### Findings
+
+**Embedded runner seam ownership — PASS**
+`wrapStreamFnWithStewardLmstudioLifecycle()` is exported from `attempt.ts` and wired at `attempt.ts:1318` immediately after `resolveEmbeddedAgentStreamFn()`. Subsequent wrappers (text transforms, tool-call sanitizers) are applied on top, so the call chain is `textTransform(lifecycle(base))`. Lifecycle fires before any stream content flows. Seam ownership is correctly placed at the embedded runner boundary, not inside the provider plugin.
+
+**Local-before-inference lifecycle wiring — PASS**
+The wrapper builds `selection` from `runtimeModel.provider`, `.id`, `.baseUrl`, `role: "primary_local"`, `purpose: "inference"`, and `requestedContextLength` (resolved from `contextTokens` → `contextWindow` → `fallbackContextTokenBudget` in priority order). Calls `ensureLifecycle()` first, then wraps the `streamFn` call inside `withQueryLock()`. Test confirms operation order: `lifecycle → load → stream`.
+
+**Remote bypass — PASS**
+`ensureLifecycle` defaults to `ensureStewardLmstudioLifecycle` which bypasses for non-lmstudio providers before acquiring any lock. Production wiring at line 1318 passes no `ensureLifecycle` override, so the real bridge is used. Test confirms: `provider: "anthropic"` → zero lifecycle events, `getLoadedLmstudioModels` not called, stream called once.
+
+**Repeated-turn no-churn — PASS**
+Each turn calls `ensureLifecycle` which calls `getLoadedLmstudioModels` and re-plans. If the same model is already loaded with sufficient context, `planLmstudioLifecycle` returns `action: "noop"` and no unload/load is invoked. Test confirms: 2 turns with same model already in loaded list → `unloadLmstudioModel` not called, `ensureLmstudioModelLoaded` not called, zero unload/load events in DB. Query lock fires 6 events (3 per turn × 2 = correct).
+
+**Query lock scope — PASS**
+`withQueryLock` wraps `params.streamFn(model, context, options)` — the call that produces the stream object. Lock is held until the stream object is returned, not until the stream is fully consumed.
+
+Structural note (non-blocking): the query lock is released as soon as the stream factory call resolves, before token streaming completes. A concurrent lifecycle call arriving mid-stream could in theory race model state. In practice this is not a live risk for the single-agent steward (one turn at a time), and LM Studio queues concurrent requests anyway. Flagged for awareness; does not block LM-D.
+
+**Test coverage — PASS**
+3 focused tests:
+1. local → lifecycle + load + query-lock events + stream in correct order
+2. remote → zero lifecycle events, stream called, no helper calls
+3. same-model repeated turns → no churn, query lock fires 6 events
+
+Injectable `ensureLifecycle` and `withQueryLock` deps enable hermetic testing without real LM Studio. Production path defaults are `ensureStewardLmstudioLifecycle` / `withStewardLmstudioQueryLock`. 3/3 pass.
+
+### Carry-forwards
+
+None. All open carry-forwards remain from prior slices:
+- CF-JB-1 (non-blocking) — no embedding-kind load action in policy
+- CF-JB-2 (non-blocking) — cross-process lock scope; future LM-E
+- CF-JB-3 (non-blocking) — `validationKnowledgeId: 0` on cooldown reuse
+
+### LM lifecycle tranche status after LM-D gate
+
+- LM-A: on `main`
+- LM-B: merged PR #23
+- LM-C: merged PR #24; reviewed PASS
+- LM-D: reviewed PASS (2026-05-03); advance-ready
+
+LM Studio lifecycle tranche is complete at the reviewer gate level. Remaining step: advance LM-D to `main`.
+
+Next process step:
+- `STEWARD2 ADVANCE LM-D`
 
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 
