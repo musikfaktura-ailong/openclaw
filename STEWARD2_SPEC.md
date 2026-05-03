@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-D reviewed PASS (2026-05-03). Advance-ready. Deployment-readiness: NO — LM-D merge to `main` still pending. Non-blocking carry-forwards: CF-JB-1, CF-JB-2, CF-JB-3. Next step: STEWARD2 ADVANCE LM-D.**
+Current phase: **LM-D merged via PR `#25` (2026-05-03). LM lifecycle tranche is closed. Deployment-readiness: evaluate next. Non-blocking carry-forwards: CF-JB-1, CF-JB-2, CF-JB-3. Next step: tranche-close/deployment-readiness spec reconciliation.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3877,12 +3877,12 @@ None. All open carry-forwards remain from prior slices:
 - LM-A: on `main`
 - LM-B: merged PR #23
 - LM-C: merged PR #24; reviewed PASS
-- LM-D: reviewed PASS (2026-05-03); advance-ready
+- LM-D: merged PR #25
 
-LM Studio lifecycle tranche is complete at the reviewer gate level. Remaining step: advance LM-D to `main`.
+LM Studio lifecycle tranche is complete on `main`.
 
 Next process step:
-- `STEWARD2 ADVANCE LM-D`
+- `STEWARD2 SPEC-Q: reconcile LM-D post-merge state and decide deployment-readiness`
 
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 
