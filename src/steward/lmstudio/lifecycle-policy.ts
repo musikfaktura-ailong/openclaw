@@ -14,7 +14,10 @@ function normalizeModelKey(modelId: string | null | undefined): string {
   if (!trimmed) {
     return "";
   }
-  return trimmed.toLowerCase().startsWith("lmstudio/") ? trimmed.slice("lmstudio/".length).trim() : trimmed;
+  const withoutPrefix = trimmed.toLowerCase().startsWith("lmstudio/")
+    ? trimmed.slice("lmstudio/".length).trim()
+    : trimmed;
+  return withoutPrefix.toLowerCase();
 }
 
 function normalizePositiveInt(value: number | null | undefined): number | undefined {
