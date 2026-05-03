@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-C merged via PR `#24` (2026-05-03). LM-D is now the next implementation slice. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet fully wired through LM-D.**
+Current phase: **LM-D implementation complete on branch `lm-d` (2026-05-03). Awaiting reviewer gate. Deployment-readiness: NO. Remaining non-blocking carry-forwards in tranche: CF-JB-1, CF-JB-2, CF-JB-3. Blocking readiness gap: LM Studio lifecycle tranche is not yet fully wired through the embedded runner seam review/merge.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -3781,6 +3781,56 @@ Result:
 
 Next process step:
 - `STEWARD2 IMPLEMENT LM-D`
+
+## LM-D implementation (2026-05-03)
+
+Implementer: Codex
+
+Files changed:
+- `src/agents/pi-embedded-runner/run/attempt.ts`
+- `src/agents/pi-embedded-runner/run/attempt.test.ts`
+
+Host-owned invariant delivered in this slice:
+- the embedded runner's live inference seam can no longer reach local LM Studio without first passing through steward lifecycle authority
+
+Behavior implemented:
+- `attempt.ts`
+  - adds `wrapStreamFnWithStewardLmstudioLifecycle()`
+  - derives steward lifecycle selection from the live runtime model:
+    - `provider`
+    - `modelId`
+    - `baseUrl`
+    - `requestedContextLength`
+  - routes every embedded runner stream call through:
+    - `ensureStewardLmstudioLifecycle()`
+    - then `withStewardLmstudioQueryLock()`
+  - wires that wrapper directly onto `activeSession.agent.streamFn` immediately after `resolveEmbeddedAgentStreamFn()`
+  - leaves all later provider/text/tool-call wrappers intact and outside the lifecycle ownership seam
+- `attempt.test.ts`
+  - adds focused LM-D seam coverage for:
+    - local LM Studio run triggers lifecycle + query-lock events before stream execution
+    - remote/API run emits no LM Studio lifecycle events
+    - repeated turns on the same already-loaded LM Studio model do not churn unload/load
+
+Focused acceptance evidence:
+- local LM Studio run emits steward lifecycle events before stream execution
+- remote/API run bypasses LM Studio lifecycle events
+- repeated same-model turns reuse the loaded model without unload/load churn
+
+Verification:
+- `corepack pnpm exec vitest run src/agents/pi-embedded-runner/run/attempt.test.ts -t wrapStreamFnWithStewardLmstudioLifecycle`
+  - PASS: `1` file, `3` tests, `113` skipped
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `corepack pnpm exec vitest run src/agents/pi-embedded-runner/run/attempt.test.ts`
+  - not used for slice verification because one unrelated pre-existing Windows path-separator failure remains in `remapInjectedContextFilesToWorkspace`
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Carry-forward:
+- none added by `LM-D` implementation
+
+Next process step:
+- reviewer gate on `LM-D`
 
 ## SPEC-Q — autonomous steward control-loop mapping before deployment testing (2026-04-29)
 

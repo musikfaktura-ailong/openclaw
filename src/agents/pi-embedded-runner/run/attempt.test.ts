@@ -1,6 +1,7 @@
 import { streamSimple } from "@mariozechner/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
+import { closeStewardDb, getDb, initStewardDb, resetDbForTest } from "../../../steward/db/db-bootstrap.js";
 import { appendBootstrapPromptWarning } from "../../bootstrap-budget.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
 import { buildAgentSystemPrompt } from "../../system-prompt.js";
@@ -23,6 +24,7 @@ import {
   resolvePromptModeForSession,
   shouldStripBootstrapFromEmbeddedContext,
   shouldWarnOnOrphanedUserRepair,
+  wrapStreamFnWithStewardLmstudioLifecycle,
   wrapStreamFnRepairMalformedToolCallArguments,
   wrapStreamFnSanitizeMalformedToolCalls,
   wrapStreamFnTrimToolCallNames,
@@ -440,6 +442,176 @@ describe("resolveEmbeddedAgentStreamFn", () => {
     });
 
     expect(streamFn).toBe(currentStreamFn);
+  });
+});
+
+describe("wrapStreamFnWithStewardLmstudioLifecycle", () => {
+  afterEach(() => {
+    closeStewardDb();
+    resetDbForTest();
+  });
+
+  it("triggers steward LM Studio lifecycle before local inference", async () => {
+    initStewardDb(":memory:");
+    const operations: string[] = [];
+    const baseStreamFn = vi.fn(async () => {
+      operations.push("stream");
+      return createFakeStream({
+        events: [],
+        resultMessage: { role: "assistant", content: "ok" },
+      });
+    });
+    const wrapped = wrapStreamFnWithStewardLmstudioLifecycle({
+      streamFn: baseStreamFn as never,
+      sessionKey: "agent:main:webchat:direct:user-1",
+      contextTokenBudget: 32_768,
+      ensureLifecycle: async ({ selection, sessionKey }) => {
+        operations.push(`lifecycle:${selection.provider}:${selection.modelId}:${selection.requestedContextLength}`);
+        return await import("../../../steward/lmstudio/lifecycle-bridge.js").then((module) =>
+          module.ensureStewardLmstudioLifecycle({
+            selection,
+            sessionKey,
+            getLoadedLmstudioModels: vi.fn(async () => []),
+            ensureLmstudioModelLoaded: vi.fn(async () => {
+              operations.push("load");
+            }),
+          }),
+        );
+      },
+    });
+
+    await wrapped(
+      {
+        provider: "lmstudio",
+        id: "qwen/qwen3-14b",
+        baseUrl: "http://127.0.0.1:1234",
+        contextWindow: 32_768,
+      } as never,
+      { messages: [] } as never,
+      {},
+    );
+
+    expect(operations).toEqual([
+      "lifecycle:lmstudio:qwen/qwen3-14b:32768",
+      "load",
+      "stream",
+    ]);
+    const kinds = (
+      getDb()
+        .prepare(`SELECT kind FROM steward_events WHERE kind LIKE 'lmstudio.lifecycle.%' ORDER BY id ASC`)
+        .all() as Array<{ kind: string }>
+    ).map((row) => row.kind);
+    expect(kinds).toEqual([
+      "lmstudio.lifecycle.lock_wait_started",
+      "lmstudio.lifecycle.lock_acquired",
+      "lmstudio.lifecycle.load_started",
+      "lmstudio.lifecycle.load_finished",
+      "lmstudio.lifecycle.lock_released",
+      "lmstudio.lifecycle.query_lock_wait_started",
+      "lmstudio.lifecycle.query_lock_acquired",
+      "lmstudio.lifecycle.query_lock_released",
+    ]);
+  });
+
+  it("does not emit LM Studio lifecycle events for remote models", async () => {
+    initStewardDb(":memory:");
+    const getLoadedLmstudioModels = vi.fn(async () => []);
+    const baseStreamFn = vi.fn(async () =>
+      createFakeStream({
+        events: [],
+        resultMessage: { role: "assistant", content: "ok" },
+      }),
+    );
+    const wrapped = wrapStreamFnWithStewardLmstudioLifecycle({
+      streamFn: baseStreamFn as never,
+      sessionKey: "agent:main:webchat:direct:user-1",
+      ensureLifecycle: async ({ selection, sessionKey }) =>
+        await import("../../../steward/lmstudio/lifecycle-bridge.js").then((module) =>
+          module.ensureStewardLmstudioLifecycle({
+            selection,
+            sessionKey,
+            getLoadedLmstudioModels,
+          }),
+        ),
+    });
+
+    await wrapped(
+      {
+        provider: "anthropic",
+        id: "claude-sonnet-4-6",
+      } as never,
+      { messages: [] } as never,
+      {},
+    );
+
+    expect(baseStreamFn).toHaveBeenCalledTimes(1);
+    expect(getLoadedLmstudioModels).not.toHaveBeenCalled();
+    const count = getDb()
+      .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind LIKE 'lmstudio.lifecycle.%'`)
+      .get() as { count: number };
+    expect(count.count).toBe(0);
+  });
+
+  it("does not churn unload/load on repeated turns when the same LM Studio model is already loaded", async () => {
+    initStewardDb(":memory:");
+    const unloadLmstudioModel = vi.fn(async () => {});
+    const ensureLmstudioModelLoaded = vi.fn(async () => {});
+    const getLoadedLmstudioModels = vi.fn(async () => [
+      {
+        modelKey: "qwen/qwen3-14b",
+        instanceId: "inst-qwen",
+        contextLength: 32_768,
+        kind: "inference" as const,
+      },
+    ]);
+    const baseStreamFn = vi.fn(async () =>
+      createFakeStream({
+        events: [],
+        resultMessage: { role: "assistant", content: "ok" },
+      }),
+    );
+    const wrapped = wrapStreamFnWithStewardLmstudioLifecycle({
+      streamFn: baseStreamFn as never,
+      sessionKey: "agent:main:webchat:direct:user-1",
+      contextTokenBudget: 32_768,
+      ensureLifecycle: async ({ selection, sessionKey }) =>
+        await import("../../../steward/lmstudio/lifecycle-bridge.js").then((module) =>
+          module.ensureStewardLmstudioLifecycle({
+            selection,
+            sessionKey,
+            getLoadedLmstudioModels,
+            unloadLmstudioModel,
+            ensureLmstudioModelLoaded,
+          }),
+        ),
+    });
+
+    const model = {
+      provider: "lmstudio",
+      id: "qwen/qwen3-14b",
+      baseUrl: "http://127.0.0.1:1234",
+      contextTokens: 32_768,
+    } as never;
+    await wrapped(model, { messages: [] } as never, {});
+    await wrapped(model, { messages: [] } as never, {});
+
+    expect(baseStreamFn).toHaveBeenCalledTimes(2);
+    expect(unloadLmstudioModel).not.toHaveBeenCalled();
+    expect(ensureLmstudioModelLoaded).not.toHaveBeenCalled();
+    const churnKinds = (
+      getDb()
+        .prepare(
+          `SELECT kind FROM steward_events
+           WHERE kind IN ('lmstudio.lifecycle.unload_started', 'lmstudio.lifecycle.unload_finished', 'lmstudio.lifecycle.load_started', 'lmstudio.lifecycle.load_finished')
+           ORDER BY id ASC`,
+        )
+        .all() as Array<{ kind: string }>
+    ).map((row) => row.kind);
+    expect(churnKinds).toEqual([]);
+    const queryLockCount = getDb()
+      .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind LIKE 'lmstudio.lifecycle.query_lock_%'`)
+      .get() as { count: number };
+    expect(queryLockCount.count).toBe(6);
   });
 });
 
