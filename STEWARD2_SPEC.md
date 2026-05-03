@@ -5669,12 +5669,16 @@ Findings:
 4. No steward event/ledger ownership added — provider layer is stateless. Confirmed.
 5. 12/12 tests pass.
 
-Carry-forwards added:
+Original reviewer findings from the first LM-B pass:
 
-- `CF-LM-B-1` — `normalizeModelKey()` does not fully lowercase the returned string — `.toLowerCase()` is used only for the `"lmstudio/"` prefix check, not applied to the returned key. Mixed-case LM Studio keys would fail `modelKeysMatch` comparisons. Low risk in practice; fix before LM-C or LM bridge wiring.
-- `CF-LM-B-2` — `ensureLmstudioModelLoaded` unloads only `loaded_instances[0]` before reload. Implicit single-instance assumption; orphan instances possible if multiple are loaded. Non-blocking.
-- `CF-LM-B-3` — `modelKeysMatch` bidirectional prefix could produce false matches on short configured keys sharing a prefix with multiple models (e.g., `"qwen"` matches any `"qwen*"`). Acceptable for typical usage but the assumption is implicit.
-- `CF-LM-B-4` — No test for `getLoadedLmstudioModels` throw path on unreachable host. The `reachable: false` → throw contract is the key behavioral difference from `discoverLmstudioModels` and should be pinned.
+- `CF-LM-B-1` — resolved in `LM-B post-review fixes`
+- `CF-LM-B-2` — resolved in `LM-B post-review fixes`
+- `CF-LM-B-3` — resolved in `LM-B post-review fixes`
+- `CF-LM-B-4` — resolved in `LM-B post-review fixes`
+
+Current LM-B carry-forward state:
+
+- none
 
 Next process step:
 - `STEWARD2 ADVANCE LM-B`
