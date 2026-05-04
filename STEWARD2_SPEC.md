@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **LM-D merged via PR `#25` (2026-05-03). LM lifecycle tranche is closed. Deployment-readiness: NO. Remaining non-blocking carry-forwards: CF-JB-1, CF-JB-2, CF-JB-3. Next step: open startup-readiness wiring slice.**
+Current phase: **`RD-1` implemented on branch `rd-1` (2026-05-03). Startup readiness is now derived from real subsystem seams instead of caller-defaulted `true`. Remaining non-blocking carry-forwards: `CF-JB-1`, `CF-JB-2`, `CF-JB-3`. Next step: reviewer gate for `RD-1`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5771,6 +5771,49 @@ Non-blocking carry-forwards still outside deployment-readiness:
 
 Next process step:
 - `STEWARD2 IMPLEMENT RD-1`
+
+## RD-1 implementation (2026-05-03)
+
+Branch:
+- `rd-1`
+
+Invariant:
+- deployment-readiness cannot be claimed from boot evidence while `truthCoreReady` and `lmStudioLifecycleReady` are synthetic defaults
+- the autonomy boot snapshot must report readiness from real host-owned subsystem seams, even when those seams are unavailable
+
+Implemented:
+- added `src/steward/autonomy/startup-readiness.ts`
+  - `resolveStewardStartupReadiness()` now derives:
+    - `truthCoreReady` from the steward truth-audit + truth-persistence runtime seam
+    - `lmStudioLifecycleReady` from the steward LM Studio lifecycle + embedded-runner seam
+- added `src/steward/lmstudio/embedded-runner-seam.ts`
+  - moved `wrapStreamFnWithStewardLmstudioLifecycle()` into a small steward-owned seam so startup readiness can probe the real LM-D runtime surface without importing the entire embedded runner
+- updated `src/steward/autonomy/boot-sequence.ts`
+  - removed `?? true` defaults for `truthCoreReady` / `lmStudioLifecycleReady`
+  - boot snapshot now requires explicit readiness booleans
+- updated `src/steward/autonomy/autonomy-bridge.ts`
+  - autonomy bridge now resolves readiness through `resolveStewardStartupReadiness()` by default
+  - test seam allows an injected readiness resolver for deterministic verification
+- updated `src/agents/pi-embedded-runner/run/attempt.ts`
+  - imports the LM-D wrapper from the new steward seam and re-exports it
+
+Verification:
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+- `corepack pnpm exec vitest run src/steward/autonomy/boot-sequence.test.ts src/steward/autonomy/autonomy-bridge.test.ts`
+  - PASS (`2` files, `7` tests)
+  - required escalation because sandbox Vitest startup still hits Windows `spawn EPERM`
+- `corepack pnpm exec vitest run src/agents/pi-embedded-runner/run/attempt.test.ts -t wrapStreamFnWithStewardLmstudioLifecycle`
+  - PASS (`1` file, `3` tests)
+  - required escalation because sandbox Vitest startup still hits Windows `spawn EPERM`
+
+Acceptance status:
+- boot record evidence now depends on real readiness resolution rather than optimistic defaults
+- failing readiness is representable in the boot snapshot without caller guesswork
+- bridge-level test proves the persisted readiness snapshot changes when readiness inputs change
+
+Next process step:
+- `STEWARD2 REVIEW RD-1`
 
 ## LM-A post-advance reconciliation (2026-05-01)
 

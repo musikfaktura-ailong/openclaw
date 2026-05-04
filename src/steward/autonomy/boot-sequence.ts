@@ -59,15 +59,15 @@ function classifyNextAction(snapshot: BootCapabilitySnapshot): {
 function buildSnapshot(params: {
   sessionId: string;
   autonomyMode: AutonomyMode;
-  lmStudioLifecycleReady?: boolean;
-  truthCoreReady?: boolean;
+  lmStudioLifecycleReady: boolean;
+  truthCoreReady: boolean;
 }): BootCapabilitySnapshot {
   const runtime = getRuntimeState(params.sessionId);
   return {
     dbReady: true,
     runtimeStatus: runtime?.status ?? "missing",
-    truthCoreReady: params.truthCoreReady ?? true,
-    lmStudioLifecycleReady: params.lmStudioLifecycleReady ?? true,
+    truthCoreReady: params.truthCoreReady,
+    lmStudioLifecycleReady: params.lmStudioLifecycleReady,
     autonomyMode: params.autonomyMode,
   };
 }
@@ -75,8 +75,8 @@ function buildSnapshot(params: {
 export function recordAutonomyBootSequence(params: {
   sessionKey: string;
   now?: number;
-  lmStudioLifecycleReady?: boolean;
-  truthCoreReady?: boolean;
+  lmStudioLifecycleReady: boolean;
+  truthCoreReady: boolean;
 }): BootRecord {
   const now = params.now ?? Date.now();
   const authority = getOrCreateStewardSession(params.sessionKey, now);

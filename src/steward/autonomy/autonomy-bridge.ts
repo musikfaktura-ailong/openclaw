@@ -5,6 +5,10 @@ import { appendStewardEvent } from "../runtime/runtime-events.js";
 import { getOrCreateStewardSession } from "../runtime/session-authority.js";
 import { recordAutonomyBootSequence, type BootRecord } from "./boot-sequence.js";
 import { runAutonomyTick, type AutonomyTickOutcome } from "./autonomy-runner.js";
+import {
+  resolveStewardStartupReadiness,
+  type StartupReadinessSnapshot,
+} from "./startup-readiness.js";
 
 const DEFAULT_AUTONOMY_INTERVAL_MS = 60_000;
 
@@ -34,15 +38,15 @@ export async function runAutonomyBridgeCycle(params: {
   sessionKey: string;
   now?: number;
   artifactRoot?: string;
-  truthCoreReady?: boolean;
-  lmStudioLifecycleReady?: boolean;
+  resolveStartupReadiness?: () => StartupReadinessSnapshot;
 }): Promise<AutonomyBridgeCycleResult> {
   const now = params.now ?? Date.now();
+  const readiness = (params.resolveStartupReadiness ?? resolveStewardStartupReadiness)();
   const boot = recordAutonomyBootSequence({
     sessionKey: params.sessionKey,
     now,
-    truthCoreReady: params.truthCoreReady,
-    lmStudioLifecycleReady: params.lmStudioLifecycleReady,
+    truthCoreReady: readiness.truthCoreReady,
+    lmStudioLifecycleReady: readiness.lmStudioLifecycleReady,
   });
   const shouldRunTick =
     boot.nextActionClass === "seed_first_task" || boot.alreadyCompleted;

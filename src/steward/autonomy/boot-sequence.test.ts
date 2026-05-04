@@ -21,6 +21,8 @@ describe("WS-IB boot sequence", () => {
     const record = recordAutonomyBootSequence({
       sessionKey: "agent:main:webchat:direct:boot-a",
       now: 2_000,
+      truthCoreReady: true,
+      lmStudioLifecycleReady: true,
     });
     const event = getDb()
       .prepare(
@@ -54,11 +56,15 @@ describe("WS-IB boot sequence", () => {
     recordAutonomyBootSequence({
       sessionKey: "agent:main:webchat:direct:boot-b",
       now: 2_000,
+      truthCoreReady: true,
+      lmStudioLifecycleReady: true,
     });
 
     const repeat = recordAutonomyBootSequence({
       sessionKey: "agent:main:webchat:direct:boot-b",
       now: 3_000,
+      truthCoreReady: true,
+      lmStudioLifecycleReady: true,
     });
     const recordedCount = getDb()
       .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind = 'autonomy.boot.recorded'`)
@@ -87,9 +93,13 @@ describe("WS-IB boot sequence", () => {
     const runningRecord = recordAutonomyBootSequence({
       sessionKey,
       now: 1_300,
+      truthCoreReady: false,
+      lmStudioLifecycleReady: true,
     });
 
     expect(runningRecord.snapshot.runtimeStatus).toBe("running");
+    expect(runningRecord.snapshot.truthCoreReady).toBe(false);
+    expect(runningRecord.snapshot.lmStudioLifecycleReady).toBe(true);
     expect(runningRecord.nextActionClass).toBe("wait_for_idle");
     expect(runningRecord.reason).toBe("user_turn_active");
   });
