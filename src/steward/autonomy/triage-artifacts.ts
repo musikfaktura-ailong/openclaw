@@ -12,6 +12,15 @@ export type AutonomyTriageArtifact = {
   knowledgeId: number;
 };
 
+export type PersistedAutonomyTriageArtifact = {
+  sessionId: string;
+  sessionKey: string;
+  workClass: AutonomyWorkClass;
+  classificationReason: string;
+  generatedAt: number;
+  seedPlan: AutonomySeedPlan;
+};
+
 function utcDay(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
 }
@@ -78,4 +87,9 @@ export async function persistAutonomyTriageArtifact(params: {
     artifactPath: filePath,
     knowledgeId,
   };
+}
+
+export async function loadTriageArtifact(artifactPath: string): Promise<PersistedAutonomyTriageArtifact> {
+  const raw = await fs.readFile(artifactPath, "utf8");
+  return JSON.parse(raw) as PersistedAutonomyTriageArtifact;
 }

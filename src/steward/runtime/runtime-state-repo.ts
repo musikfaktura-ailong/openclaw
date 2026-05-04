@@ -1,6 +1,10 @@
 import { getDb } from "../db/db-bootstrap.js";
 import { withBoundedRetries, withImmediateTransaction } from "../db/tx.js";
-import type { StewardRuntimeStateRow, StewardRuntimeStatus } from "../db/runtime-schema.js";
+import type {
+  StewardRuntimeStateRow,
+  StewardRuntimeStatus,
+  StewardRuntimeTriggerSource,
+} from "../db/runtime-schema.js";
 import { getRuntimeState } from "./runtime-state.js";
 
 export function getOrCreateRuntimeState(sessionKey: string, now = Date.now()): StewardRuntimeStateRow {
@@ -8,8 +12,8 @@ export function getOrCreateRuntimeState(sessionKey: string, now = Date.now()): S
   db.prepare(
     `INSERT INTO steward_runtime_state (
        session_key, status, owner_pid, active_flow_id, active_task_id, heartbeat_ts, last_transition_ts,
-       wait_reason, last_error, version, data_json
-     ) VALUES (?, 'idle', NULL, NULL, NULL, ?, ?, '', '', 0, '{}')
+       wait_reason, last_error, version, data_json, trigger_source
+     ) VALUES (?, 'idle', NULL, NULL, NULL, ?, ?, '', '', 0, '{}', NULL)
      ON CONFLICT(session_key) DO NOTHING`,
   ).run(sessionKey, now, now);
   const state = getRuntimeState(sessionKey);
@@ -26,6 +30,7 @@ export function casUpdateRuntimeState(params: {
   activeFlowId?: number | null;
   activeTaskId?: number | null;
   ownerPid?: number | null;
+  triggerSource?: StewardRuntimeTriggerSource | null;
   heartbeatTs?: number | null;
   lastTransitionTs?: number;
   waitReason?: string;
@@ -38,6 +43,7 @@ export function casUpdateRuntimeState(params: {
       `UPDATE steward_runtime_state
        SET status = ?,
            owner_pid = ?,
+           trigger_source = ?,
            active_flow_id = ?,
            active_task_id = ?,
            heartbeat_ts = ?,
@@ -52,6 +58,7 @@ export function casUpdateRuntimeState(params: {
     .run(
       params.status,
       params.ownerPid ?? null,
+      params.triggerSource ?? null,
       params.activeFlowId ?? null,
       params.activeTaskId ?? null,
       params.heartbeatTs ?? null,
@@ -69,6 +76,7 @@ export function markRuntimeRunning(params: {
   sessionKey: string;
   flowId: number;
   taskId: number;
+  triggerSource?: StewardRuntimeTriggerSource;
   now?: number;
 }): StewardRuntimeStateRow {
   // port of core/runtime_flow.py flow activation semantics into Steward2 runtime state
@@ -83,6 +91,7 @@ export function markRuntimeRunning(params: {
           sessionKey: params.sessionKey,
           expectedVersion: current.version,
           status: "running",
+          triggerSource: params.triggerSource ?? "user",
           activeFlowId: params.flowId,
           activeTaskId: params.taskId,
           ownerPid: process.pid,
@@ -118,6 +127,7 @@ export function markRuntimeIdle(params: {
           sessionKey: params.sessionKey,
           expectedVersion: current.version,
           status: "idle",
+          triggerSource: null,
           activeFlowId: null,
           activeTaskId: null,
           ownerPid: null,

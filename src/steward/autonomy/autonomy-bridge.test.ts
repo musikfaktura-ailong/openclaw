@@ -1,12 +1,34 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeStewardDb, getDb, initStewardDb, resetDbForTest } from "../db/db-bootstrap.js";
 import { markAutonomyBootCompleted, setAutonomyMode } from "./autonomy-state.js";
 import { markRuntimeRunning } from "../runtime/runtime-state-repo.js";
 import { getOrCreateStewardSession } from "../runtime/session-authority.js";
-import { runAutonomyBridgeCycle, startStewardAutonomyBridge } from "./autonomy-bridge.js";
+import {
+  recordAutonomyBridgeFailure,
+  runAutonomyBridgeCycle,
+  startStewardAutonomyBridge,
+} from "./autonomy-bridge.js";
+
+async function removeTempDirWithRetry(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const busy = error instanceof Error && String(error).includes("resource busy or locked");
+      if (!busy) {
+        throw error;
+      }
+      if (attempt === 4) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
 
 describe("WS-K autonomy bridge", () => {
   beforeEach(() => {
@@ -64,8 +86,63 @@ describe("WS-K autonomy bridge", () => {
       expect(flowCreatedEvent.count).toBe(0);
       expect(flowTask.task_id).toBe(hostTask.id);
       expect(flowTask.state_json).toContain("\"triage_artifact_path\"");
+      expect(result.execute).toBeNull();
     } finally {
-      await fs.rm(tempRoot, { recursive: true, force: true });
+      closeStewardDb();
+      resetDbForTest();
+      await removeTempDirWithRetry(tempRoot);
+    }
+  });
+
+  it("runs a full seed-then-execute cycle through the unified runtime", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-bridge-exec-"));
+    const storePath = path.join(tempRoot, "sessions.json");
+    await fs.writeFile(storePath, "{}", "utf8");
+    closeStewardDb();
+    resetDbForTest();
+    initStewardDb(storePath);
+    try {
+      const sessionKey = "agent:main:webchat:direct:ws-l-bridge-exec";
+      setAutonomyMode({ mode: "assistant_plus_autonomy", now: 10_000 });
+
+      const result = await runAutonomyBridgeCycle({
+        cfg: {} as never,
+        sessionKey,
+        storePath,
+        now: 10_100,
+        artifactRoot: tempRoot,
+        resolveStartupReadiness: () => ({
+          truthCoreReady: true,
+          lmStudioLifecycleReady: true,
+        }),
+        runAgent: (vi.fn().mockResolvedValue({
+          payloads: [{ text: "Grounded autonomy execution completed." }],
+          meta: {
+            durationMs: 1,
+            aborted: false,
+            finalAssistantVisibleText: "Grounded autonomy execution completed.",
+          },
+        }) as never),
+      });
+
+      const hostTask = getDb()
+        .prepare(`SELECT status FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
+        .get() as { status: string };
+      const executionEvent = getDb()
+        .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind = 'autonomy.execution.completed'`)
+        .get() as { count: number };
+
+      expect(result.tick?.status).toBe("seeded");
+      expect(result.execute).toMatchObject({
+        status: "claimed",
+        outcome: "completed",
+      });
+      expect(hostTask.status).toBe("done");
+      expect(executionEvent.count).toBe(1);
+    } finally {
+      closeStewardDb();
+      resetDbForTest();
+      await removeTempDirWithRetry(tempRoot);
     }
   });
 
@@ -204,6 +281,39 @@ describe("WS-K autonomy bridge", () => {
 
       expect(result.boot.recorded).toBe(true);
       expect(bootEvent.count).toBe(1);
+    } finally {
+      closeStewardDb();
+      resetDbForTest();
+      initStewardDb(":memory:");
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("can persist bridge failures without a pre-initialized cached steward db", async () => {
+    closeStewardDb();
+    resetDbForTest();
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-bridge-failure-db-"));
+    const storePath = path.join(tempDir, "sessions.json");
+    try {
+      recordAutonomyBridgeFailure({
+        sessionKey: "agent:main:webchat:direct:ws-k-bridge-failure-persist",
+        storePath,
+        now: 5_000,
+        error: new Error("boom"),
+      });
+
+      const failedEvent = getDb()
+        .prepare(
+          `SELECT kind, data_json
+           FROM steward_events
+           WHERE kind = 'autonomy.bridge.failed'
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get() as { kind: string; data_json: string } | undefined;
+
+      expect(failedEvent?.kind).toBe("autonomy.bridge.failed");
+      expect(failedEvent?.data_json).toContain("boom");
     } finally {
       closeStewardDb();
       resetDbForTest();

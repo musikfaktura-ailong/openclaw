@@ -13,6 +13,8 @@ import { isCliProvider } from "../model-selection.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../usage.js";
 import { recordTurnComplete } from "../../steward/runtime/runtime-bridge.js";
 import { createSimpleCompletionStewardClassifier } from "../../steward/proof/proof-judge.js";
+import type { ProofTaskType } from "../../steward/proof/proof-types.js";
+import type { StewardRuntimeTriggerSource } from "../../steward/db/runtime-schema.js";
 
 type RunResult = Awaited<ReturnType<(typeof import("../pi-embedded.js"))["runEmbeddedPiAgent"]>>;
 
@@ -56,6 +58,14 @@ export async function updateSessionStoreAfterAgentRun(params: {
   defaultModel: string;
   fallbackProvider?: string;
   fallbackModel?: string;
+  stewardContext?: {
+    triggerSource?: StewardRuntimeTriggerSource;
+    hostTaskId?: number | null;
+    taskId?: number | null;
+    taskType?: ProofTaskType;
+    taskTitle?: string;
+    taskDetails?: string;
+  };
   result: RunResult;
 }) {
   const {
@@ -173,11 +183,15 @@ export async function updateSessionStoreAfterAgentRun(params: {
   await recordTurnComplete({
     storePath,
     sessionKey,
+    triggerSource: params.stewardContext?.triggerSource,
+    hostTaskId: params.stewardContext?.hostTaskId ?? null,
     result: {
       aborted: result.meta.aborted ?? false,
       finalAssistantText: resolveProofCandidateText(result),
-      taskTitle: "Agent turn completion",
-      taskType: "general",
+      taskId: params.stewardContext?.taskId ?? null,
+      taskTitle: params.stewardContext?.taskTitle ?? "Agent turn completion",
+      taskType: params.stewardContext?.taskType ?? "general",
+      taskDetails: params.stewardContext?.taskDetails ?? "",
       classifier: stewardClassifier,
     },
   });

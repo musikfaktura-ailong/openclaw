@@ -85,4 +85,30 @@ describe("WS-H maintenance governor", () => {
       Number((db.prepare(`SELECT COUNT(*) AS count FROM steward_flow_tasks WHERE flow_id = ?`).get(flowId) as { count: number }).count),
     ).toBe(0);
   });
+
+  it("does not prune knowledge still referenced by an autonomy host task", () => {
+    const session = getOrCreateStewardSession("agent:main:webchat:direct:governor-host-task", 1_000);
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO steward_knowledge (
+         session_key, memory_type, text, metadata_json, embedding_blob, embedding_dims, embedding_model, created_ts, updated_ts
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(session.channelKey, "shared_thread", "triage", '{"fallback_embed":true}', Buffer.from([0, 1]), 2, "test", 1, 1);
+    const knowledgeId = Number(
+      (db.prepare(`SELECT id FROM steward_knowledge ORDER BY id DESC LIMIT 1`).get() as { id: number }).id,
+    );
+    db.prepare(
+      `INSERT INTO steward_host_tasks (
+         session_id, source, status, work_class, title, details, triage_knowledge_id, created_ts, updated_ts
+       ) VALUES (?, 'autonomy', 'pending', 'goal_work', 'keep', 'keep', ?, ?, ?)`,
+    ).run(session.sessionId, knowledgeId, 1, 1);
+
+    const result = pruneGovernorData(40 * 24 * 60 * 60 * 1000);
+    const remaining = db.prepare(`SELECT COUNT(*) AS count FROM steward_knowledge WHERE id = ?`).get(knowledgeId) as {
+      count: number;
+    };
+
+    expect(result.knowledgePruned).toBe(0);
+    expect(remaining.count).toBe(1);
+  });
 });

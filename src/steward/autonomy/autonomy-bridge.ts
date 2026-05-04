@@ -4,9 +4,13 @@ import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.j
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { initStewardDb } from "../db/db-bootstrap.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
-import { getOrCreateStewardSession } from "../runtime/session-authority.js";
+import { getOrCreateStewardSession, resolveSessionAuthority } from "../runtime/session-authority.js";
 import { recordAutonomyBootSequence, type BootRecord } from "./boot-sequence.js";
 import { runAutonomyTick, type AutonomyTickOutcome } from "./autonomy-runner.js";
+import {
+  runAutonomyExecuteCycle,
+  type AutonomyExecuteOutcome,
+} from "./autonomy-executor.js";
 import {
   resolveStewardStartupReadiness,
   type StartupReadinessSnapshot,
@@ -23,7 +27,36 @@ export type AutonomyBridgeCycleResult = {
   sessionKey: string;
   boot: BootRecord;
   tick: AutonomyTickOutcome | null;
+  execute: AutonomyExecuteOutcome | null;
 };
+
+export function recordAutonomyBridgeFailure(params: {
+  sessionKey: string;
+  storePath: string;
+  now: number;
+  error: unknown;
+}): void {
+  const authority = resolveSessionAuthority(params.sessionKey);
+  const errorText = String(params.error);
+  try {
+    initStewardDb(params.storePath);
+    const persistedAuthority = getOrCreateStewardSession(params.sessionKey, params.now);
+    appendStewardEvent({
+      kind: "autonomy.bridge.failed",
+      message: "autonomy bridge cycle failed",
+      sessionId: persistedAuthority.sessionId,
+      now: params.now,
+      data: {
+        sessionKey: params.sessionKey,
+        error: errorText,
+      },
+    });
+  } catch (eventError) {
+    console.error(
+      `[steward/autonomy] failed to persist bridge failure for ${params.sessionKey}: ${String(eventError)}; original error: ${errorText}`,
+    );
+  }
+}
 
 function resolveAutonomySessionKeys(cfg: OpenClawConfig): string[] {
   const listed = (cfg.agents?.list ?? [])
@@ -43,11 +76,13 @@ function resolveAutonomyStorePath(cfg: OpenClawConfig): string {
 }
 
 export async function runAutonomyBridgeCycle(params: {
+  cfg?: OpenClawConfig;
   sessionKey: string;
   storePath: string;
   now?: number;
   artifactRoot?: string;
   resolveStartupReadiness?: () => StartupReadinessSnapshot;
+  runAgent?: Parameters<typeof runAutonomyExecuteCycle>[0]["runAgent"];
 }): Promise<AutonomyBridgeCycleResult> {
   const now = params.now ?? Date.now();
   initStewardDb(params.storePath);
@@ -67,6 +102,18 @@ export async function runAutonomyBridgeCycle(params: {
         now,
       })
     : null;
+  const execute =
+    shouldRunTick &&
+    params.cfg &&
+    (tick?.status === "seeded" || tick == null || tick.status === "noop")
+      ? await runAutonomyExecuteCycle({
+          cfg: params.cfg,
+          sessionKey: params.sessionKey,
+          storePath: params.storePath,
+          now,
+          runAgent: params.runAgent,
+        })
+      : null;
   appendStewardEvent({
     kind: "autonomy.bridge.tick",
     message: "autonomy bridge cycle completed",
@@ -79,12 +126,16 @@ export async function runAutonomyBridgeCycle(params: {
       bootReason: boot.reason,
       tickStatus: tick?.status ?? "skipped_after_boot",
       tickReason: tick?.reason ?? boot.reason,
+      executeStatus: execute?.status ?? "not_run",
+      executeOutcome: execute?.status === "claimed" ? execute.outcome : null,
+      executeHostTaskId: execute?.status === "claimed" ? execute.hostTaskId : null,
     },
   });
   return {
     sessionKey: params.sessionKey,
     boot,
     tick,
+    execute,
   };
 }
 
@@ -123,22 +174,18 @@ export function startStewardAutonomyBridge(params: {
         const tickNow = nowMs();
         try {
           await runAutonomyBridgeCycle({
+            cfg: state.cfg,
             sessionKey,
             storePath: state.storePath,
             now: tickNow,
             artifactRoot: params.artifactRoot,
           });
         } catch (error) {
-          const authority = getOrCreateStewardSession(sessionKey, tickNow);
-          appendStewardEvent({
-            kind: "autonomy.bridge.failed",
-            message: "autonomy bridge cycle failed",
-            sessionId: authority.sessionId,
+          recordAutonomyBridgeFailure({
+            sessionKey,
+            storePath: state.storePath,
             now: tickNow,
-            data: {
-              sessionKey,
-              error: String(error),
-            },
+            error,
           });
         }
       }

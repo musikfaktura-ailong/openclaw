@@ -189,7 +189,9 @@ export function pruneGovernorData(now = Date.now()): {
            SELECT k.id
            FROM steward_knowledge k
            LEFT JOIN steward_memories m ON m.knowledge_id = k.id
+           LEFT JOIN steward_host_tasks ht ON ht.triage_knowledge_id = k.id
            WHERE k.created_ts < ?
+             AND ht.id IS NULL
              AND (
                COALESCE(m.confidence_score, 0) < 0.6
                OR k.metadata_json LIKE '%"fallback_embed":true%'
