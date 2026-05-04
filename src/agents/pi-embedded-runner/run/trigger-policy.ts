@@ -9,6 +9,9 @@ const DEFAULT_EMBEDDED_RUN_TRIGGER_POLICY: EmbeddedRunTriggerPolicy = {
 };
 
 const EMBEDDED_RUN_TRIGGER_POLICY: Partial<Record<EmbeddedRunTrigger, EmbeddedRunTriggerPolicy>> = {
+  autonomy: {
+    injectHeartbeatPrompt: false,
+  },
   cron: {
     injectHeartbeatPrompt: false,
   },

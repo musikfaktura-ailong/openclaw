@@ -1,4 +1,5 @@
 export type StewardRuntimeStatus = "idle" | "running" | "waiting" | "blocked";
+export type StewardRuntimeTriggerSource = "user" | "autonomy";
 
 export type StewardSessionStatus = "open" | "closed";
 
@@ -35,6 +36,8 @@ export type StewardEventKind =
   | "autonomy.tick.noop"
   | "autonomy.task.seeded"
   | "autonomy.triage.recorded"
+  | "autonomy.execution.completed"
+  | "autonomy.execution.failed"
   | "job.daily_self_review.recorded"
   | "job.daily_self_review.reused"
   | "job.daily_self_review.memory_extracted"
@@ -92,6 +95,7 @@ export type StewardEventKind =
 export type StewardRuntimeStateRow = {
   sessionKey: string;
   status: StewardRuntimeStatus;
+  triggerSource: StewardRuntimeTriggerSource | null;
   ownerPid: number | null;
   activeFlowId: number | null;
   activeTaskId: number | null;
@@ -145,7 +149,7 @@ export type StewardEventRow = {
   dataJson: string;
 };
 
-export type StewardHostTaskStatus = "pending" | "claimed" | "completed" | "cancelled";
+export type StewardHostTaskStatus = "pending" | "running" | "done" | "failed" | "blocked";
 
 export type StewardHostTaskRow = {
   id: number;
@@ -157,6 +161,11 @@ export type StewardHostTaskRow = {
   details: string;
   triageArtifactPath: string | null;
   triageKnowledgeId: number | null;
+  claimedTs: number | null;
+  completedTs: number | null;
+  failedTs: number | null;
+  errorJson: string;
+  blockedReason: string;
   createdTs: number;
   updatedTs: number;
 };

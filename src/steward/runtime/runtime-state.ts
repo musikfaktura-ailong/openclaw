@@ -1,4 +1,8 @@
-import type { StewardRuntimeStateRow, StewardRuntimeStatus } from "../db/runtime-schema.js";
+import type {
+  StewardRuntimeStateRow,
+  StewardRuntimeStatus,
+  StewardRuntimeTriggerSource,
+} from "../db/runtime-schema.js";
 import { getDb } from "../db/db-bootstrap.js";
 
 function rowToRuntimeState(
@@ -6,6 +10,7 @@ function rowToRuntimeState(
     | {
         session_key: string;
         status: StewardRuntimeStatus;
+        trigger_source: StewardRuntimeTriggerSource | null;
         owner_pid: number | null;
         active_flow_id: number | null;
         active_task_id: number | null;
@@ -24,6 +29,7 @@ function rowToRuntimeState(
   return {
     sessionKey: row.session_key,
     status: row.status,
+    triggerSource: row.trigger_source ?? null,
     ownerPid: row.owner_pid,
     activeFlowId: row.active_flow_id,
     activeTaskId: row.active_task_id,
@@ -40,7 +46,7 @@ export function getRuntimeState(sessionKey: string): StewardRuntimeStateRow | nu
   const row = getDb()
     .prepare(
       `SELECT session_key, status, owner_pid, active_flow_id, active_task_id, heartbeat_ts,
-              last_transition_ts, wait_reason, last_error, version, data_json
+              last_transition_ts, wait_reason, last_error, version, data_json, trigger_source
        FROM steward_runtime_state WHERE session_key = ?`,
     )
     .get(sessionKey) as Parameters<typeof rowToRuntimeState>[0];

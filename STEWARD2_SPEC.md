@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **deployment testing in progress (2026-05-04). Live blocker `DPL-1` was found and fixed on `main`: the autonomy bridge now initializes steward DB authority from the resolved session-store path before boot/tick reads. Remaining non-blocking carry-forwards: `CF-JB-1`, `CF-JB-2`, `CF-JB-3`. Next step: rerun clean gateway deployment and monitor live steward behavior.**
+Current phase: **deployment testing paused for structural analysis (2026-05-04). Live testing proved a new blocker: Steward2 autonomy can now boot truthfully, pass policy, and seed real host tasks/flows, but it does not execute them. The missing invariant is a host-owned execution handoff from seeded autonomy work into an active OpenClaw turn. Next step: review the new “Deployment gap — autonomy execution handoff vs OpenClaw in-turn autonomy” section before any code.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5838,6 +5838,528 @@ Why:
 
 Next process step:
 - begin deployment / live evaluation testing
+
+## Deployment gap — autonomy execution handoff vs OpenClaw in-turn autonomy (2026-05-04)
+
+Why this section exists:
+- deployment testing exposed a structural mismatch in our assumptions
+- the old steward and `OLD_AI` were not only “able to seed tasks”; they owned a continuous host loop that claimed, executed, and terminalized work
+- OpenClaw is not globally autonomous in that sense, but once a task/turn is active it has deep execution autonomy inside the turn
+- Steward2 currently has the first half from PEQS (`seed`) and the second half from OpenClaw (`active-turn execution`), but no host-owned bridge between them
+
+### Live deployment evidence already observed
+
+Confirmed on the live steward DB during deployment testing:
+- autonomy boot ran
+- autonomy policy allowed execution once mode switched to `assistant_plus_autonomy`
+- real rows were created in:
+  - `steward_host_tasks`
+  - `steward_flows`
+  - `steward_flow_tasks`
+- `autonomy.task.seeded` and `autonomy.triage.recorded` were persisted
+- duplicate suppression and cooldown then behaved correctly on later ticks
+
+But also confirmed:
+- `steward_runtime_state` remained idle / empty for the seeded work
+- no active runtime claim occurred for the autonomy-created task
+- seeded flow stayed `resumable`
+- seeded host task stayed `pending`
+
+So the failure is not “autonomy cannot think” or “OpenClaw cannot run.” The exact failure is:
+- **seeded autonomy work is never promoted into the active OpenClaw turn runtime**
+
+### What the original steward / PEQS actually does
+
+Relevant donor files:
+- `C:\ai_agent\PEQS\interfaces\daemon.py`
+- `C:\ai_agent\PEQS\core\controller.py`
+- `C:\ai_agent\PEQS\core\runtime_flow.py`
+
+Observed invariant in PEQS:
+- `interfaces/daemon.py` owns a persistent outer loop and restarts `run_controller(config)` whenever the controller returns idle or crashes
+- `Controller.run()` in `core/controller.py` does not stop at seeding:
+  - `get_next_task()`
+  - fallback `_seed_from_goals_if_needed()`
+  - `runtime_set_running(...)`
+  - `_run_task(task)`
+  - terminal update of flow/task/runtime state
+- system ticks (`self_improvement`, `strategy_validation`, `metacog`, heuristics decay, maintenance governor) run in the same host loop
+
+Meaning:
+- in PEQS, **task creation and task execution are one continuous host-owned control path**
+- once a task exists and is selected, the same runtime loop claims it and executes it immediately
+
+### What `OLD_AI` actually does
+
+Relevant donor files:
+- `C:\ai_agent\OLD_AI\interfaces\daemon.py`
+- `C:\ai_agent\OLD_AI\core\controller.py`
+- `C:\ai_agent\OLD_AI\core\autonomy.py`
+- `C:\ai_agent\OLD_AI\core\scheduler.py`
+- `C:\ai_agent\OLD_AI\core\goal_orchestrator.py`
+
+Observed invariant in `OLD_AI`:
+- daemon provides the persistent owner process and schema/runtime safety
+- scheduler and goal-orchestrator seed work across lanes (`planning`, `exec`, `review`, `bootstrap`, `awake`)
+- controller does not merely record those tasks; it continuously picks active tasks and executes their plans/tool sequences
+- goal orchestrator explicitly performs `GOAL -> PLANNING -> EXEC` handoff, not just goal note creation
+
+Meaning:
+- `OLD_AI` separates *which* subsystem seeds work, but execution still converges into one active host-run controller loop
+- again, there is no state where real seeded work just sits as DB intent with no execution owner
+
+### What OpenClaw actually provides
+
+Relevant OpenClaw files:
+- `C:\ai_agent\Steward2\src\agents\pi-embedded-runner\run\attempt.ts`
+- `C:\ai_agent\Steward2\src\agents\pi-tools.before-tool-call.ts`
+- `C:\ai_agent\Steward2\src\agents\session-tool-result-guard.ts`
+- `C:\ai_agent\Steward2\src\agents\pi-embedded-subscribe.tools.ts`
+- `C:\ai_agent\Steward2\src\agents\pi-tool-definition-adapter.ts`
+
+Confirmed OpenClaw invariant:
+- OpenClaw does **not** own a PEQS-style global self-seeding daemon mission
+- but once a turn is active, `runEmbeddedAttempt(...)` creates a long-lived execution envelope around that turn
+- `activeSession.prompt(...)` is not a single-shot text call; comments and wiring in `attempt.ts` show it is wrapped for:
+  - tool continuations
+  - before-tool-call gating
+  - approval pauses
+  - tool-result persistence / synthetic repair
+  - compaction / retry / timeout handling
+  - yield / abort / replay state
+  - stream wrappers and transport recovery
+- `session-tool-result-guard.ts` maintains transcript correctness across tool-call/tool-result cycles
+- `pi-tools.before-tool-call.ts` enforces host-owned precheck and consequence policy before execution
+
+Meaning:
+- OpenClaw already has **deep within-task autonomy**
+- once a task/turn is admitted into the OpenClaw runtime, it can keep acting, call tools, react to results, retry, and continue until completion or interruption
+
+### Steward2’s exact mismatch
+
+Relevant current Steward2 files:
+- `src/steward/autonomy/autonomy-runner.ts`
+- `src/steward/autonomy/goal-orchestrator.ts`
+- `src/steward/runtime/session-bridge.ts`
+- `src/steward/runtime/runtime-flow.ts`
+
+Current Steward2 behavior:
+- `autonomy-runner.ts` evaluates policy, classifies work, and calls `seedIdleAutonomyTask(...)`
+- `goal-orchestrator.ts` creates real host task rows and triage evidence
+- `session-bridge.ts` is currently the only path that:
+  - creates a runtime flow
+  - marks runtime running
+  - runs completion/proof/value/control post-turn logic
+- that path is only called from inbound user-turn lifecycle seams
+
+Therefore:
+- Steward2 can now create **real** autonomy work
+- but it still lacks a host-owned mechanism that says:
+  - “this pending autonomy host task becomes an active OpenClaw execution turn now”
+
+This is the live blocker.
+
+### Ownership conclusion
+
+The missing invariant is:
+- **every seedable autonomy host task must have a host-owned promotion path into the same active-turn execution machinery that inbound user turns use**
+
+What must own this:
+- not the planner
+- not a prompt instruction
+- not the heartbeat LLM turn itself
+- not a fake “note.write means we already did the work” shortcut
+
+What should be reused from OpenClaw:
+- the active-turn execution substrate in `runEmbeddedAttempt(...)`
+- tool loop, approvals, retries, compaction, transcript discipline, and messaging surfaces
+
+What must remain steward-owned:
+- selecting which seeded host task is eligible
+- claiming it from DB
+- binding it to steward runtime state
+- recording that this run is an autonomy execution run rather than an inbound operator turn
+- terminalizing it back into steward flow/task/proof/value/control state
+
+### Structural design target before code
+
+The new bridge must do all of the following:
+- read one eligible pending autonomy host task from steward DB
+- claim it atomically so two timers/processes cannot run the same task
+- promote its linked steward flow/task into runtime-running state
+- invoke an OpenClaw active turn with steward-owned prompt/task material derived from the host task
+- let the normal OpenClaw turn machinery own tool execution from that point onward
+- on completion, route back through the same steward post-turn seams:
+  - proof judge
+  - task value
+  - metacog
+  - maintenance governor
+  - self-improvement
+- persist terminal host-task and flow status back to DB
+- preserve mutual exclusion with inbound user turns
+
+### Explicit non-goals
+
+Do **not** solve this by:
+- moving autonomy logic into a fake heartbeat prompt
+- letting the model “decide to keep going” without a host task claim
+- creating another detached execution path that bypasses `session-bridge.ts`
+- bypassing proof/consequence/truth/value modules because the work is “internal”
+- creating more seeded flows/tasks without a matching execution owner
+
+### New blockers before any code
+
+- `BD-EXEC-1` — execution entry seam:
+  - decide the exact OpenClaw seam that can start an autonomy-owned active turn without pretending it is a normal inbound message
+- `BD-EXEC-2` — runtime ownership contract:
+  - decide whether autonomy execution reuses `session-bridge.ts` directly or whether a sibling `autonomy-session-bridge.ts` is needed so inbound and autonomy runs share post-turn semantics without lying about trigger/source
+- `BD-EXEC-3` — host task claim semantics:
+  - define the DB claim transition for `steward_host_tasks` (`pending -> running -> done/failed/blocked`) and all dependent readers/writers
+- `BD-EXEC-4` — prompt/task materialization:
+  - define what exact prompt payload or task envelope an autonomy host task contributes to OpenClaw so the run is deterministic, bounded, and reviewable
+- `BD-EXEC-5` — completion evidence:
+  - define what runtime traces, DB rows, and live logs must prove that a seeded autonomy task actually executed through OpenClaw rather than only being re-labeled in DB
+
+### Reviewer focus for the next spec gate
+
+Before any implementation opens, reviewer must be able to answer:
+- what exact OpenClaw function will own the active-turn execution once autonomy claims a host task?
+- what exact steward module claims the task and writes running/terminal state?
+- what exact post-turn path proves proof/value/control logic still runs for autonomy executions?
+- what exact runtime evidence will distinguish:
+  - seeded only
+  - seeded + running
+  - seeded + completed
+
+### BD-EXEC resolutions (2026-05-04)
+
+Informed by direct review of Codex (OpenAI agent) and ii-agent (intelligent-internet) execution models alongside the existing OpenClaw runtime.
+
+#### BD-EXEC-1 — execution entry seam: RESOLVED
+
+Decision: call `runEmbeddedAttempt()` directly from the new steward autonomy executor.
+
+Rationale:
+- Codex equivalent: `turn/start` RPC triggers execution on an existing thread without a user-visible message; the turn is owned by the host process (App Server), not the user
+- ii-agent equivalent: `claim_task()` → `arun()` called inline in the same call chain; there is no separate promotion event, the claim IS the execution start
+- OpenClaw already provides `runEmbeddedAttempt()` as a complete long-lived execution envelope: tool continuations, before-tool-call gating, approval pauses, transcript repair, compaction/retry/timeout, stream wrappers — all present
+- The autonomy executor must NOT go through the inbound user-turn path (`session-bridge.ts` message ingestion), but MUST reach the same `runEmbeddedAttempt()` call that inbound turns reach
+- Concretely: the executor constructs a synthetic `EmbeddedAttemptParams` from the host task triage artifact and calls `runEmbeddedAttempt(params)` directly — same substrate, different entry point
+
+What the executor does NOT do:
+- does not push a user message to the WebChat gateway
+- does not go through `handleMessage()` or any public turn ingestion path
+- does not fake a heartbeat model turn and hope the model "decides" to execute the task
+
+#### BD-EXEC-2 — runtime ownership contract: RESOLVED
+
+Decision: reuse `session-bridge.ts` post-turn seams; propagate `triggerSource: 'autonomy' | 'user'` from runtime start through to completion evidence.
+
+Rationale:
+- ii-agent does not create a separate autonomy session handler; the same `arun()` and `acontinue_run()` handle both inbound socket events and resumed paused tasks — trigger context is metadata, not a parallel execution path
+- Creating a sibling `autonomy-session-bridge.ts` that duplicates proof/value/metacog/governor logic is prohibited by the non-goals: do not create another detached execution path that bypasses `session-bridge.ts`
+- Instead: `triggerSource` is threaded through the entire run lifecycle, not only the post-turn seam:
+  - `markRuntimeRunning()` receives `triggerSource` so `steward_runtime_state` itself records whether the active run is user or autonomy owned — this is required for mutual exclusion readers that inspect runtime state to distinguish an active user turn from an active autonomy execution
+  - `session-bridge.ts` post-turn seams carry `triggerSource` forward: `'autonomy'` runs tag all emitted `steward_events` with `host_task_id` and `autonomy_source: true` so they are distinguishable from user-turn events in DB queries
+  - terminal `autonomy.execution.completed/failed` events carry `triggerSource: 'autonomy'` explicitly in `data_json`
+- The mutual exclusion invariant does not change: bridge cycle blocks when `user_turn_active`; user turns block when autonomy execution is running (same `steward_runtime_state` claim, now labeled)
+
+#### BD-EXEC-3 — host task claim semantics: RESOLVED
+
+Decision: atomic CAS on `steward_host_tasks` using `UPDATE ... WHERE status = 'pending' AND id = ? RETURNING *`.
+
+State machine:
+```
+pending → running → done
+                  → failed
+                  → blocked
+```
+
+Claim protocol:
+```sql
+UPDATE steward_host_tasks
+SET status = 'running', claimed_at = ?
+WHERE id = ? AND status = 'pending'
+RETURNING id, state_json
+```
+- zero rows returned = already claimed or terminal; executor skips silently
+- non-zero rows = claim succeeded; executor proceeds to materialization
+- analogous to ii-agent's DB partial unique index with `IntegrityError` on conflict — zero `RETURNING` rows is the same signal as a constraint violation: another runner owns it
+
+Selection protocol (before claim):
+```sql
+SELECT id, state_json FROM steward_host_tasks
+WHERE status = 'pending'
+ORDER BY id ASC
+LIMIT 1
+```
+- one task at a time; executor must not claim a second task while any task has `status = 'running'`
+- this check is identical to ii-agent's check for active `(session_id, task_type)` rows before creating a new one
+
+Terminal write-back:
+- on turn completion: `UPDATE steward_host_tasks SET status = 'done', completed_at = ? WHERE id = ?`
+- on turn failure/timeout: `UPDATE steward_host_tasks SET status = 'failed', failed_at = ?, error_json = ? WHERE id = ?`
+- on mutual-exclusion conflict during execution (rare): `UPDATE steward_host_tasks SET status = 'blocked', blocked_reason = ? WHERE id = ?`
+
+#### BD-EXEC-4 — prompt/task materialization: RESOLVED
+
+Decision: read `triage_artifact_path` directly from the claimed `steward_host_tasks` row; construct a bounded autonomy turn prompt from the triage artifact content.
+
+Materialization steps:
+1. Parse `state_json` from the claimed host task row
+2. Call `loadTriageArtifact(hostTask.triage_artifact_path)` from `triage-artifacts.ts` — artifact I/O and schema remain owned by that module; the executor does not do raw file reads or parse artifact JSON directly
+3. Extract from triage artifact:
+   - `work_class` — one of `research_pick`, `proof_repair`, `advance_validated_opportunity`
+   - `goal_context` — the current proof/goal state that motivated this task
+   - `repair_context` — (proof_repair only) the rejected proof and failure reason
+   - `advance_context` — (advance_validated_opportunity only) the validated opportunity details
+4. Construct a `systemPrompt` string that contains:
+   - steward identity and operating context
+   - explicit work-class instruction derived from `work_class`
+   - goal context and evidence from the triage artifact
+   - explicit completion criteria: what the model must produce as terminal output (e.g., a proof submission, a research note, an advancement action)
+   - hard turn limit: maximum 20 tool calls per autonomy execution to bound runaway execution
+5. Pass as `EmbeddedAttemptParams`:
+   - `systemPrompt` from step 4
+   - `userMessage` derived from `goal_context` + `work_class` directive
+   - `sessionKey` from the session authority bound to this bridge instance
+   - `flowId` / `taskId` from the linked `steward_flows` / `steward_flow_tasks` rows
+
+Analogous to Codex: every autonomous turn (`thread/shellCommand`, `review/start`, `thread/inject_items`) has an explicit scope and a bounded completion gate — it is not open-ended chat re-entry.
+
+#### BD-EXEC-5 — completion evidence: RESOLVED
+
+Decision: terminal state must be proved by all of the following simultaneously:
+- `steward_host_tasks.status` = `done` or `failed` (not `pending` or `running`)
+- `steward_runtime_state.status` = `idle` (runtime is free for next user turn or autonomy cycle)
+- `steward_flows.status` = `completed` or `failed` (flow terminal)
+- presence of `autonomy.execution.completed` or `autonomy.execution.failed` event in `steward_events` with `host_task_id` and `outcome`
+- presence of `proof.submitted` (or `proof.skipped` with reason) in `steward_events` for `proof_repair` and `advance_validated_opportunity` work classes
+- presence of `task.value.recorded` and `metacog.recorded` in `steward_events` (routed through `session-bridge.ts` post-turn seams)
+
+What does NOT count as completion evidence:
+- host task row exists with `status = 'running'` (still in flight)
+- `autonomy.task.seeded` present but no `autonomy.execution.completed` (seeded but never executed — the current gap)
+- `steward_runtime_state` still showing the autonomy task's flowId/taskId (turn did not finalize)
+
+The combination of all five signals proves that a seeded autonomy task actually ran through OpenClaw, not just re-labeled in DB.
+
+### WS-L — autonomy execution handoff (2026-05-04)
+
+Goal: close the gap identified in "Deployment gap" above. Every seeded `steward_host_tasks` row in `pending` state must have a host-owned promotion path into OpenClaw's `runEmbeddedAttempt()` and out through steward's `session-bridge.ts` post-turn seams.
+
+Implementer: Codex
+
+Reviewer: Claude
+
+Donor to review before implementation:
+- `C:\ai_agent\PEQS\core\controller.py` — the continuous claim-then-execute host loop pattern
+- `C:\ai_agent\OLD_AI\core\goal_orchestrator.py` — `GOAL → PLANNING → EXEC` handoff without a separate promotion layer
+- `src/steward/autonomy/autonomy-bridge.ts` — existing bridge cycle structure to extend
+- `src/agents/pi-embedded-runner/run/attempt.ts` — `runEmbeddedAttempt()` entry point
+- `src/steward/runtime/session-bridge.ts` — post-turn seams to reuse
+
+Files to add:
+- `src/steward/autonomy/autonomy-executor.ts`
+  - `runAutonomyExecuteCycle(params)` — claims one pending host task, materializes prompt, calls `runEmbeddedAttempt()`, routes completion
+  - `claimNextAutonomyTask(now)` — atomic CAS claim returning claimed row or null
+  - `materializeAutonomyTurnParams(hostTask, sessionKey)` — calls `loadTriageArtifact()` from `triage-artifacts.ts` and constructs `EmbeddedAttemptParams`; does not own artifact I/O or schema
+  - `terminalizeAutonomyTask(hostTaskId, outcome, now)` — writes `done/failed` terminal state to DB and emits `autonomy.execution.completed/failed`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+  - claim succeeds on `pending` row, skips on `running` or absent
+  - execute cycle emits `autonomy.execution.completed` and leaves host task `done`
+  - mutual exclusion: execute cycle skips when `user_turn_active`
+  - failed turn leaves host task `failed` with error_json
+
+Files to change:
+- `src/steward/autonomy/autonomy-bridge.ts`
+  - `runAutonomyBridgeCycle()` gains a third phase after boot and tick: `execute`
+  - execute phase calls `runAutonomyExecuteCycle()` when a pending host task exists and no user turn is active
+  - result shape gains `execute?: { status: 'claimed' | 'none_pending' | 'blocked'; hostTaskId?: number; outcome?: string }`
+- `src/steward/autonomy/autonomy-bridge.test.ts`
+  - extend existing tests to assert execute phase result
+  - add test: full seed-then-execute cycle in one harnessed run produces `autonomy.execution.completed` event
+- `src/steward/autonomy/triage-artifacts.ts`
+  - export `loadTriageArtifact(path: string): Promise<TriageArtifact>` — the executor's single point of entry for artifact I/O; keeps schema ownership in the module that writes artifacts
+- `src/steward/runtime/runtime-state-repo.ts`
+  - `markRuntimeRunning()` gains `triggerSource: 'autonomy' | 'user'` parameter
+  - persisted runtime state row includes `trigger_source` so mutual exclusion readers can distinguish an active autonomy execution from an active user turn without inspecting flow/task tables
+- `src/steward/runtime/session-bridge.ts`
+  - accept and propagate `triggerSource` through post-turn context
+  - tag all emitted `steward_events` with `autonomy_source: true` and `host_task_id` when `triggerSource === 'autonomy'`
+- `src/steward/db/runtime-schema.ts`
+  - add `claimed_at`, `completed_at`, `failed_at`, `error_json`, `blocked_reason` columns to `steward_host_tasks`
+  - add `trigger_source` column to runtime state table
+
+Host-owned invariant to deliver:
+- every `steward_host_tasks` row that reaches `pending` state has a deterministic path to `done/failed`
+- that path runs through `runEmbeddedAttempt()` (real OpenClaw tool execution), not a DB label change
+- proof/value/metacog/governor post-turn logic runs identically for autonomy and user turns
+- BD-EXEC-1 through BD-EXEC-5 are all satisfied
+
+Focused acceptance evidence:
+- a full harnessed cycle (no live LM Studio required; stub `runEmbeddedAttempt()` to return a minimal completion) shows:
+  - `autonomy.task.seeded` present (from WS-K)
+  - `autonomy.execution.completed` present (from WS-L)
+  - host task status = `done`
+  - flow status = `completed`
+  - `steward_runtime_state` idle after execute phase
+- mutual exclusion: execute phase skips and returns `blocked` when `user_turn_active`
+- error path: stub `runEmbeddedAttempt()` to throw; host task status = `failed`; `autonomy.execution.failed` present
+
+Carry-forwards from the deployment gap section that WS-L must close:
+- `BD-EXEC-1` through `BD-EXEC-5` — all resolved in design above, now require implementation
+- live blocker: `steward_runtime_state` stays idle for seeded work — resolved by `runAutonomyExecuteCycle()` claiming and marking runtime running before calling `runEmbeddedAttempt()`
+
+Required verification before reviewer gate:
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-executor.test.ts src/steward/autonomy/autonomy-bridge.test.ts src/steward/runtime/ws-a.integration.test.ts`
+
+WS-L implementer delivery rule:
+- stop at implementation-ready
+- do not open PR, advance, or merge as part of `IMPLEMENT`
+- implementation report must include:
+  - branch name
+  - commit hash
+  - files added/changed
+  - exact verification commands run
+  - exact pass/fail result counts
+
+### WS-L reviewer gate
+
+Reviewer focus:
+- execution entry seam is really `runEmbeddedAttempt()` and not an inbound-message fake path
+- host task claim is atomic and prevents duplicate execution
+- runtime ownership stays unified:
+  - no second execution runtime
+  - no bypass around `session-bridge.ts` post-turn seams
+- `triggerSource` and `host_task_id` evidence is visible at runtime start and completion
+- triage artifact loading is owned by `triage-artifacts.ts`, not ad hoc file reads
+- full seed -> claim -> execute -> terminalize harness proves the gap is closed
+
+Reviewer must inspect:
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+- `src/steward/autonomy/autonomy-bridge.ts`
+- `src/steward/autonomy/autonomy-bridge.test.ts`
+- `src/steward/runtime/session-bridge.ts`
+- `src/steward/runtime/runtime-state-repo.ts`
+- `src/steward/db/runtime-schema.ts`
+- any migration file added for host-task/runtime-state columns
+
+Reviewer pass condition:
+- all WS-L acceptance evidence is satisfied
+- no detached autonomy-only execution path was introduced
+- seeded autonomy work now has a real host-owned path into OpenClaw active-turn execution
+
+Reviewer fail condition:
+- any path still leaves host tasks pending without execution ownership
+- any path bypasses proof/value/metacog/governor completion seams
+- any path fakes execution by DB relabeling without `runEmbeddedAttempt()`
+
+### WS-L advancement gate
+
+Advancement condition:
+- reviewer verdict = `PASS`
+- required verification commands are recorded as passing
+- spec is updated with:
+  - implementation handoff
+  - reviewer verdict
+  - any carry-forwards
+
+Advancement output:
+- open PR `ws-l -> main`
+- merge only after reviewer/approval process says `ADVANCE`
+- after merge, run post-merge spec reconciliation before opening any further deployment slice
+
+### Next process step
+
+- `STEWARD2 IMPLEMENT WS-L: implement autonomy-executor.ts and wire into autonomy-bridge cycle`
+
+## WS-L implementation gate (2026-05-04)
+
+Implementer: Codex
+
+Files added:
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+- `src/steward/db/migrations/0005_autonomy_execution.sql`
+
+Files changed:
+- `src/steward/autonomy/autonomy-bridge.ts`
+- `src/steward/autonomy/autonomy-bridge.test.ts`
+- `src/steward/autonomy/triage-artifacts.ts`
+- `src/steward/runtime/session-bridge.ts`
+- `src/steward/runtime/runtime-bridge.ts`
+- `src/steward/runtime/runtime-state.ts`
+- `src/steward/runtime/runtime-state-repo.ts`
+- `src/steward/runtime/ws-a.integration.test.ts`
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/control/maintenance-governor.ts`
+- `src/steward/control/maintenance-governor.test.ts`
+- `src/agents/command/session-store.ts`
+- `src/agents/pi-embedded-runner/run/params.ts`
+- `src/agents/pi-embedded-runner/run/trigger-policy.ts`
+
+Host-owned invariant delivered in this slice:
+- seeded autonomy host tasks now have a deterministic host-owned path:
+  - `pending -> running -> done/failed`
+- autonomy execution reuses the unified OpenClaw active-turn runtime instead of inventing a second runtime
+- steward runtime start/completion evidence now carries `triggerSource` and `host_task_id`
+- completion still runs through proof / task-value / metacog / governor / self-improvement seams
+
+Behavior implemented:
+- `autonomy-executor.ts`
+  - atomically claims one pending autonomy host task
+  - loads the persisted triage artifact through `triage-artifacts.ts`
+  - materializes one bounded autonomy turn
+  - starts steward runtime ownership with `triggerSource = autonomy`
+  - executes through the real embedded runner path
+  - terminalizes the host task and emits:
+    - `autonomy.execution.completed`
+    - `autonomy.execution.failed`
+- `autonomy-bridge.ts`
+  - bridge cycle now has boot -> tick -> execute phases
+  - a seeded task can execute in the same bridge cycle
+- runtime schema / migration
+  - adds `trigger_source` to `steward_runtime_state`
+  - adds host-task lifecycle columns:
+    - `claimed_at`
+    - `completed_at`
+    - `failed_at`
+    - `error_json`
+    - `blocked_reason`
+  - normalizes old host-task status names forward
+- `session-bridge.ts` / `session-store.ts`
+  - generalized start seam now supports existing flow/task activation
+  - completion path propagates autonomy evidence without bypassing existing post-turn ownership
+- `maintenance-governor.ts`
+  - governor pruning now preserves knowledge rows still referenced by autonomy host tasks
+  - this closed a real FK failure discovered during WS-L verification
+
+Focused acceptance evidence:
+- full harnessed seed -> execute cycle:
+  - `autonomy.task.seeded`
+  - `autonomy.execution.completed`
+  - host task status = `done`
+  - claimed flow status = `completed`
+  - runtime state returns to `idle`
+- blocked path:
+  - execute cycle returns `blocked` when runtime is already active
+- failed path:
+  - host task status = `failed`
+  - `error_json` populated
+  - `autonomy.execution.failed` emitted
+
+Verification:
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-executor.test.ts src/steward/autonomy/autonomy-bridge.test.ts src/steward/runtime/ws-a.integration.test.ts src/steward/control/maintenance-governor.test.ts`
+  - PASS: `4` files, `19` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+
+Carry-forward:
+- none added by `WS-L` implementation
 
 ## LM-A post-advance reconciliation (2026-05-01)
 

@@ -17,7 +17,14 @@ import type {
 import type { SkillSnapshot } from "../../skills.js";
 export type { ClientToolDefinition } from "../../command/shared-types.js";
 
-export type EmbeddedRunTrigger = "cron" | "heartbeat" | "manual" | "memory" | "overflow" | "user";
+export type EmbeddedRunTrigger =
+  | "autonomy"
+  | "cron"
+  | "heartbeat"
+  | "manual"
+  | "memory"
+  | "overflow"
+  | "user";
 
 export type RunEmbeddedPiAgentParams = {
   sessionId: string;

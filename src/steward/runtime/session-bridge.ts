@@ -15,6 +15,7 @@ import { adjudicateTaskValue } from "../mission/task-value.js";
 import { runMetacogMonitorTick } from "../control/metacog-monitor.js";
 import { runMaintenanceGovernorTick } from "../control/maintenance-governor.js";
 import { runSelfImprovementTick } from "../control/self-improvement.js";
+import type { StewardRuntimeTriggerSource } from "../db/runtime-schema.js";
 
 function resolveTerminalTaskStatus(params: {
   aborted: boolean;
@@ -29,26 +30,33 @@ function resolveTerminalTaskStatus(params: {
   return "succeeded";
 }
 
-export async function recordInboundTurnStart(params: {
+export async function recordStewardTurnStart(params: {
   storePath: string;
   sessionKey: string;
+  flowId: number;
+  taskId: number;
+  triggerSource: StewardRuntimeTriggerSource;
+  hostTaskId?: number | null;
 }): Promise<void> {
   initStewardDb(params.storePath);
   const authority = getOrCreateStewardSession(params.sessionKey);
-  const { flowId, taskId } = createRuntimeFlow({ sessionId: authority.sessionId });
   markRuntimeRunning({
     sessionKey: authority.sessionId,
-    flowId,
-    taskId,
+    flowId: params.flowId,
+    taskId: params.taskId,
+    triggerSource: params.triggerSource,
   });
   appendStewardEvent({
     kind: "runtime.started",
-    message: "Inbound turn started",
+    message: "Runtime turn started",
     sessionId: authority.sessionId,
-    flowId,
+    flowId: params.flowId,
     data: {
       sessionKey: params.sessionKey,
-      taskId,
+      taskId: params.taskId,
+      triggerSource: params.triggerSource,
+      hostTaskId: params.hostTaskId ?? null,
+      autonomySource: params.triggerSource === "autonomy",
     },
   });
   await projectSessionToCompatibilityStore({
@@ -58,9 +66,27 @@ export async function recordInboundTurnStart(params: {
   });
 }
 
+export async function recordInboundTurnStart(params: {
+  storePath: string;
+  sessionKey: string;
+}): Promise<void> {
+  initStewardDb(params.storePath);
+  const authority = getOrCreateStewardSession(params.sessionKey);
+  const { flowId, taskId } = createRuntimeFlow({ sessionId: authority.sessionId });
+  await recordStewardTurnStart({
+    storePath: params.storePath,
+    sessionKey: params.sessionKey,
+    flowId,
+    taskId,
+    triggerSource: "user",
+  });
+}
+
 export async function recordTurnComplete(params: {
   storePath: string;
   sessionKey: string;
+  triggerSource?: StewardRuntimeTriggerSource;
+  hostTaskId?: number | null;
   result?: {
     aborted?: boolean;
     finalAssistantText?: string;
@@ -74,6 +100,7 @@ export async function recordTurnComplete(params: {
   initStewardDb(params.storePath);
   const authority = getOrCreateStewardSession(params.sessionKey);
   const current = getRuntimeState(authority.sessionId);
+  const triggerSource = params.triggerSource ?? current?.triggerSource ?? "user";
   const now = Date.now();
   const aborted = params.result?.aborted === true;
   const proofResult =
@@ -145,6 +172,9 @@ export async function recordTurnComplete(params: {
     flowId: current?.activeFlowId ?? null,
     data: {
       sessionKey: params.sessionKey,
+      triggerSource,
+      hostTaskId: params.hostTaskId ?? null,
+      autonomySource: triggerSource === "autonomy",
       aborted,
       proofId: proofResult?.proofId ?? null,
       proofVerdict: proofResult?.verdict ?? null,
