@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`RD-1` implemented on branch `rd-1` (2026-05-03). Startup readiness is now derived from real subsystem seams instead of caller-defaulted `true`. Remaining non-blocking carry-forwards: `CF-JB-1`, `CF-JB-2`, `CF-JB-3`. Next step: reviewer gate for `RD-1`.**
+Current phase: **`RD-1` merged via PR `#26` (2026-05-04). Deployment-readiness: YES. Remaining non-blocking carry-forwards: `CF-JB-1`, `CF-JB-2`, `CF-JB-3`. Next step: begin deployment / live evaluation testing.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -5814,6 +5814,30 @@ Acceptance status:
 
 Next process step:
 - `STEWARD2 REVIEW RD-1`
+
+## RD-1 post-merge reconciliation + deployment-readiness decision (2026-05-04)
+
+Merge result:
+- `RD-1` merged via PR `#26`
+- merge commit: `f6d996a8676e274653b26d03a68096e775eaec82`
+
+Reconciliation:
+- startup boot evidence is no longer caller-defaulted for:
+  - `truthCoreReady`
+  - `lmStudioLifecycleReady`
+- autonomy boot snapshots now derive readiness from real steward-owned subsystem seams
+- the deployment-readiness blocker recorded after `LM-D` is closed
+
+Decision:
+- deployment-readiness is **YES**
+
+Why:
+- the only remaining blocker after `LM-D` was untruthful boot readiness evidence
+- `RD-1` replaced that optimistic path with real readiness derivation and test coverage
+- remaining carry-forwards `CF-JB-1`, `CF-JB-2`, and `CF-JB-3` stay non-blocking and do not affect deployment-readiness
+
+Next process step:
+- begin deployment / live evaluation testing
 
 ## LM-A post-advance reconciliation (2026-05-01)
 
