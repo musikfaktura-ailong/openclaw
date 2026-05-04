@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`RD-1` merged via PR `#26` (2026-05-04). Deployment-readiness: YES. Remaining non-blocking carry-forwards: `CF-JB-1`, `CF-JB-2`, `CF-JB-3`. Next step: begin deployment / live evaluation testing.**
+Current phase: **deployment testing in progress (2026-05-04). Live blocker `DPL-1` was found and fixed on `main`: the autonomy bridge now initializes steward DB authority from the resolved session-store path before boot/tick reads. Remaining non-blocking carry-forwards: `CF-JB-1`, `CF-JB-2`, `CF-JB-3`. Next step: rerun clean gateway deployment and monitor live steward behavior.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 

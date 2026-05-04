@@ -89,10 +89,15 @@ describe("server-runtime-services", () => {
   it("activates heartbeat, cron, and delivery recovery after sidecars are ready", async () => {
     const cron = { start: vi.fn(async () => undefined) };
     const log = createLog();
+    const cfg = {
+      session: {
+        store: "/tmp/gateway-sessions.json",
+      },
+    } as never;
 
     const services = activateGatewayScheduledServices({
       minimalTestGateway: false,
-      cfgAtStart: {} as never,
+      cfgAtStart: cfg,
       cron,
       logCron: { error: vi.fn() },
       log,
@@ -100,6 +105,11 @@ describe("server-runtime-services", () => {
 
     expect(hoisted.startHeartbeatRunner).toHaveBeenCalledTimes(1);
     expect(hoisted.startStewardAutonomyBridge).toHaveBeenCalledTimes(1);
+    expect(hoisted.startStewardAutonomyBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg,
+      }),
+    );
     expect(cron.start).toHaveBeenCalledTimes(1);
     expect(services.heartbeatRunner).toBe(hoisted.heartbeatRunner);
     expect(services.autonomyBridge).toBe(hoisted.autonomyBridge);
@@ -107,7 +117,7 @@ describe("server-runtime-services", () => {
     expect(hoisted.recoverPendingDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
         deliver: hoisted.deliverOutboundPayloads,
-        cfg: {},
+        cfg,
       }),
     );
   });

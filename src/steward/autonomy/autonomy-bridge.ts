@@ -1,6 +1,8 @@
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { resolveStorePath } from "../../config/sessions/paths.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { initStewardDb } from "../db/db-bootstrap.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
 import { getOrCreateStewardSession } from "../runtime/session-authority.js";
 import { recordAutonomyBootSequence, type BootRecord } from "./boot-sequence.js";
@@ -34,13 +36,21 @@ function resolveAutonomySessionKeys(cfg: OpenClawConfig): string[] {
   return [resolveAgentMainSessionKey({ cfg, agentId: resolveDefaultAgentId(cfg) })];
 }
 
+function resolveAutonomyStorePath(cfg: OpenClawConfig): string {
+  return resolveStorePath(cfg.session?.store, {
+    agentId: resolveDefaultAgentId(cfg),
+  });
+}
+
 export async function runAutonomyBridgeCycle(params: {
   sessionKey: string;
+  storePath: string;
   now?: number;
   artifactRoot?: string;
   resolveStartupReadiness?: () => StartupReadinessSnapshot;
 }): Promise<AutonomyBridgeCycleResult> {
   const now = params.now ?? Date.now();
+  initStewardDb(params.storePath);
   const readiness = (params.resolveStartupReadiness ?? resolveStewardStartupReadiness)();
   const boot = recordAutonomyBootSequence({
     sessionKey: params.sessionKey,
@@ -80,6 +90,7 @@ export async function runAutonomyBridgeCycle(params: {
 
 export function startStewardAutonomyBridge(params: {
   cfg: OpenClawConfig;
+  storePath?: string;
   artifactRoot?: string;
   intervalMs?: number;
   nowMs?: () => number;
@@ -87,6 +98,7 @@ export function startStewardAutonomyBridge(params: {
   const state = {
     cfg: params.cfg,
     sessionKeys: resolveAutonomySessionKeys(params.cfg),
+    storePath: params.storePath ?? resolveAutonomyStorePath(params.cfg),
     stopped: false,
     running: false,
     timer: null as NodeJS.Timeout | null,
@@ -112,6 +124,7 @@ export function startStewardAutonomyBridge(params: {
         try {
           await runAutonomyBridgeCycle({
             sessionKey,
+            storePath: state.storePath,
             now: tickNow,
             artifactRoot: params.artifactRoot,
           });
@@ -148,6 +161,7 @@ export function startStewardAutonomyBridge(params: {
   const updateConfig = (cfg: OpenClawConfig) => {
     state.cfg = cfg;
     state.sessionKeys = resolveAutonomySessionKeys(cfg);
+    state.storePath = resolveAutonomyStorePath(cfg);
   };
 
   arm();

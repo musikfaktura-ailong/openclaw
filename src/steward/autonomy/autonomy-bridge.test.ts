@@ -27,6 +27,7 @@ describe("WS-K autonomy bridge", () => {
 
       const result = await runAutonomyBridgeCycle({
         sessionKey,
+        storePath: ":memory:",
         now: 1_200,
         artifactRoot: tempRoot,
         resolveStartupReadiness: () => ({
@@ -82,6 +83,7 @@ describe("WS-K autonomy bridge", () => {
 
     const result = await runAutonomyBridgeCycle({
       sessionKey,
+      storePath: ":memory:",
       now: 1_200,
       resolveStartupReadiness: () => ({
         truthCoreReady: false,
@@ -108,6 +110,7 @@ describe("WS-K autonomy bridge", () => {
           list: [{ id: "main", label: "Main" }],
         },
       } as never,
+      storePath: ":memory:",
       artifactRoot: blockingFile,
       intervalMs: 1_000,
       nowMs: (() => {
@@ -144,6 +147,7 @@ describe("WS-K autonomy bridge", () => {
 
     const first = await runAutonomyBridgeCycle({
       sessionKey,
+      storePath: ":memory:",
       now: 1_100,
       resolveStartupReadiness: () => ({
         truthCoreReady: false,
@@ -161,6 +165,7 @@ describe("WS-K autonomy bridge", () => {
 
     const second = await runAutonomyBridgeCycle({
       sessionKey: `${sessionKey}-2`,
+      storePath: ":memory:",
       now: 2_100,
       resolveStartupReadiness: () => ({
         truthCoreReady: true,
@@ -170,5 +175,40 @@ describe("WS-K autonomy bridge", () => {
 
     expect(second.boot.snapshot.truthCoreReady).toBe(true);
     expect(second.boot.snapshot.lmStudioLifecycleReady).toBe(false);
+  });
+
+  it("initializes steward db from the provided storePath on a fresh bridge cycle", async () => {
+    closeStewardDb();
+    resetDbForTest();
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-bridge-db-"));
+    const storePath = path.join(tempDir, "sessions.json");
+    try {
+      initStewardDb(storePath);
+      setAutonomyMode({ mode: "assistant_plus_autonomy", now: 4_000 });
+      closeStewardDb();
+      resetDbForTest();
+
+      const result = await runAutonomyBridgeCycle({
+        sessionKey: "agent:main:webchat:direct:ws-k-bridge-db-init",
+        storePath,
+        now: 4_100,
+        resolveStartupReadiness: () => ({
+          truthCoreReady: true,
+          lmStudioLifecycleReady: true,
+        }),
+      });
+
+      const bootEvent = getDb()
+        .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind = 'autonomy.boot.recorded'`)
+        .get() as { count: number };
+
+      expect(result.boot.recorded).toBe(true);
+      expect(bootEvent.count).toBe(1);
+    } finally {
+      closeStewardDb();
+      resetDbForTest();
+      initStewardDb(":memory:");
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
