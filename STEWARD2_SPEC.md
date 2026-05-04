@@ -6274,7 +6274,7 @@ Advancement output:
 
 ### Next process step
 
-- `STEWARD2 IMPLEMENT WS-L: implement autonomy-executor.ts and wire into autonomy-bridge cycle`
+- ~~`STEWARD2 IMPLEMENT WS-L`~~ ✓ done 2026-05-04 — PASS on code and tests; reviewer gate: PASS; issue `STEWARD2 ADVANCE WS-L` to open PR and merge.
 
 ## WS-L implementation gate (2026-05-04)
 
@@ -6360,6 +6360,49 @@ Verification:
 
 Carry-forward:
 - none added by `WS-L` implementation
+
+## WS-L reviewer gate (2026-05-04)
+
+Reviewer: Claude
+
+Files inspected:
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+- `src/steward/autonomy/autonomy-bridge.ts`
+- `src/steward/runtime/session-bridge.ts` (via `runtime-bridge.ts` re-export)
+- `src/steward/runtime/runtime-state-repo.ts`
+- `src/agents/command/session-store.ts`
+- `src/steward/autonomy/triage-artifacts.ts`
+- `src/steward/db/migrations/0005_autonomy_execution.sql`
+
+Findings per reviewer focus criteria:
+
+**1. Execution entry seam is `runEmbeddedPiAgent()`, not a fake path** — PASS
+`autonomy-executor.ts:339`: `const result = (await runAgent(runParams)) as EmbeddedPiRunResult;` where `runAgent` defaults to `runEmbeddedPiAgent`. No DB-relabeling shortcut. Host tasks go through real OpenClaw active-turn execution.
+
+**2. Host task claim is atomic — no duplicate execution** — PASS
+`claimNextAutonomyTask` wraps `findPendingAutonomyTask` + UPDATE inside `withImmediateTransaction`. The UPDATE uses `WHERE id = ? AND status = 'pending'` and aborts via `return null` if `claimed.changes !== 1`. Test case "claims a pending autonomy task exactly once" verifies a second concurrent claim returns null.
+
+**3. Runtime ownership unified — no second execution runtime, no bypass around `session-bridge.ts` post-turn seams** — PASS
+Success path: `recordStewardTurnStart` → `runEmbeddedPiAgent` → `updateSessionStoreAfterAgentRun`. Critically, `updateSessionStoreAfterAgentRun` (`session-store.ts`) calls `recordTurnComplete` internally with full `stewardContext` including `triggerSource: "autonomy"` and `hostTaskId`. Proof / task-value / metacog / governor seams execute on the success path, not bypassed.
+Failure path: explicit `recordTurnComplete` → `completeRuntimeFlow` → `markRuntimeIdle` — also not bypassed.
+
+**4. `triggerSource` and `host_task_id` visible at runtime start and completion** — PASS
+`recordStewardTurnStart` called with `triggerSource: "autonomy"` and `hostTaskId`. `markRuntimeRunning` persists `trigger_source` column (migration adds it). Both terminal events (`autonomy.execution.completed`, `autonomy.execution.failed`) carry `autonomySource: true`, `triggerSource: "autonomy"`, and `hostTaskId` in `data_json`. Test asserts `autonomySource:true` in event payload.
+
+**5. Triage artifact loading owned by `triage-artifacts.ts`** — PASS
+`materializeAutonomyTurnParams` calls `loadTriageArtifact(params.hostTask.triageArtifactPath)` — the path comes directly from the claimed `steward_host_tasks` row. No ad hoc `fs.readFile` in the executor.
+
+**6. Full seed → claim → execute → terminalize harness proves the gap is closed** — PASS
+`autonomy-executor.test.ts`: 4 tests covering claim-once, blocked-when-runtime-active, success full-cycle (host task `done`, flow `completed`, runtime `idle`, `autonomy.execution.completed` event), and failure path (host task `failed`, `error_json` contains error, `autonomy.execution.failed` event).
+Combined with `autonomy-bridge.test.ts` and `ws-a.integration.test.ts`, the full seed→execute chain is exercised end-to-end. TypeScript: PASS. Vitest: 19 tests PASS across 4 files.
+
+**Noted design decision (not a failure):**
+The execute phase of `autonomy-bridge.ts` only runs when `params.cfg` is provided. A bridge cycle invoked without `cfg` ticks/seeds but never executes. This is intentional test-harness isolation — any production bridge invocation supplies cfg. Not a gap.
+
+Verdict: **PASS.** All WS-L acceptance criteria met. No detached autonomy-only execution path was introduced. Seeded autonomy work now has a real host-owned path into OpenClaw active-turn execution. No post-turn seam is bypassed on either the success or failure path.
+
+Next process step: `STEWARD2 ADVANCE WS-L` — open PR `ws-l -> main`, merge after approval, run post-merge spec reconciliation.
 
 ## LM-A post-advance reconciliation (2026-05-01)
 
