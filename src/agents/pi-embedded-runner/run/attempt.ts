@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -24,11 +24,7 @@ import { getPluginToolMeta } from "../../../plugins/tools.js";
 import { isAcpSessionKey, isSubagentSessionKey } from "../../../routing/session-key.js";
 import { normalizeOptionalLowercaseString } from "../../../shared/string-coerce.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
-import {
-  ensureStewardLmstudioLifecycle,
-  withStewardLmstudioQueryLock,
-  type StewardLmstudioLifecycleBridgeResult,
-} from "../../../steward/lmstudio/lifecycle-bridge.js";
+import { wrapStreamFnWithStewardLmstudioLifecycle } from "../../../steward/lmstudio/embedded-runner-seam.js";
 import { mergeStewardMemoryIntoExtraSystemPrompt } from "../../../steward/memory/prompt-context.js";
 import { buildValueScorerPromptContext } from "../../../steward/mission/value-scorer.js";
 import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
@@ -257,7 +253,6 @@ import {
   shouldPreemptivelyCompactBeforePrompt,
 } from "./preemptive-compaction.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
-import type { ProviderRuntimeModel } from "../../../plugins/provider-runtime-model.types.js";
 
 export {
   appendAttemptCacheTtlIfNeeded,
@@ -298,78 +293,7 @@ export {
 
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
 
-function resolveRequestedContextLengthForLifecycle(params: {
-  model: ProviderRuntimeModel;
-  fallbackContextTokenBudget?: number;
-}): number | undefined {
-  const candidates = [
-    params.model.contextTokens,
-    params.model.contextWindow,
-    params.fallbackContextTokenBudget,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
-      return Math.floor(candidate);
-    }
-  }
-  return undefined;
-}
-
-export function wrapStreamFnWithStewardLmstudioLifecycle(params: {
-  streamFn: StreamFn;
-  sessionKey?: string;
-  contextTokenBudget?: number;
-  ensureLifecycle?: (params: {
-    selection: {
-      provider?: string | null;
-      modelId?: string | null;
-      baseUrl?: string | null;
-      role?: "primary_local";
-      purpose?: "inference";
-      requestedContextLength?: number | null;
-    };
-    sessionKey?: string;
-  }) => Promise<StewardLmstudioLifecycleBridgeResult>;
-  withQueryLock?: <T>(params: {
-    selection: {
-      provider?: string | null;
-      modelId?: string | null;
-      baseUrl?: string | null;
-      role?: "primary_local";
-      purpose?: "inference";
-      requestedContextLength?: number | null;
-    };
-    sessionKey?: string;
-    task: () => Promise<T>;
-  }) => Promise<T>;
-}): StreamFn {
-  const ensureLifecycle = params.ensureLifecycle ?? ensureStewardLmstudioLifecycle;
-  const queryLock = params.withQueryLock ?? withStewardLmstudioQueryLock;
-
-  return async (model, context, options) => {
-    const runtimeModel = model as ProviderRuntimeModel;
-    const selection = {
-      provider: runtimeModel.provider ?? null,
-      modelId: runtimeModel.id ?? null,
-      baseUrl: runtimeModel.baseUrl ?? null,
-      role: "primary_local" as const,
-      purpose: "inference" as const,
-      requestedContextLength: resolveRequestedContextLengthForLifecycle({
-        model: runtimeModel,
-        fallbackContextTokenBudget: params.contextTokenBudget,
-      }),
-    };
-    await ensureLifecycle({
-      selection,
-      sessionKey: params.sessionKey,
-    });
-    return await queryLock({
-      selection,
-      sessionKey: params.sessionKey,
-      task: async () => await Promise.resolve(params.streamFn(model, context, options)),
-    });
-  };
-}
+export { wrapStreamFnWithStewardLmstudioLifecycle } from "../../../steward/lmstudio/embedded-runner-seam.js";
 
 export function resolveUnknownToolGuardThreshold(loopDetection?: {
   enabled?: boolean;

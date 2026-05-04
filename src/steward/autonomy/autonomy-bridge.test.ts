@@ -29,6 +29,10 @@ describe("WS-K autonomy bridge", () => {
         sessionKey,
         now: 1_200,
         artifactRoot: tempRoot,
+        resolveStartupReadiness: () => ({
+          truthCoreReady: true,
+          lmStudioLifecycleReady: true,
+        }),
       });
       const bootEvent = getDb()
         .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind = 'autonomy.boot.recorded'`)
@@ -79,6 +83,10 @@ describe("WS-K autonomy bridge", () => {
     const result = await runAutonomyBridgeCycle({
       sessionKey,
       now: 1_200,
+      resolveStartupReadiness: () => ({
+        truthCoreReady: false,
+        lmStudioLifecycleReady: true,
+      }),
     });
     const hostTaskCount = getDb()
       .prepare(`SELECT COUNT(*) AS count FROM steward_host_tasks`)
@@ -128,5 +136,39 @@ describe("WS-K autonomy bridge", () => {
       runner.stop();
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("records the real readiness snapshot from the bridge resolver", async () => {
+    const sessionKey = "agent:main:webchat:direct:ws-k-bridge-readiness";
+    setAutonomyMode({ mode: "assistant_plus_autonomy", now: 1_000 });
+
+    const first = await runAutonomyBridgeCycle({
+      sessionKey,
+      now: 1_100,
+      resolveStartupReadiness: () => ({
+        truthCoreReady: false,
+        lmStudioLifecycleReady: true,
+      }),
+    });
+
+    expect(first.boot.snapshot.truthCoreReady).toBe(false);
+    expect(first.boot.snapshot.lmStudioLifecycleReady).toBe(true);
+
+    closeStewardDb();
+    resetDbForTest();
+    initStewardDb(":memory:");
+    setAutonomyMode({ mode: "assistant_plus_autonomy", now: 2_000 });
+
+    const second = await runAutonomyBridgeCycle({
+      sessionKey: `${sessionKey}-2`,
+      now: 2_100,
+      resolveStartupReadiness: () => ({
+        truthCoreReady: true,
+        lmStudioLifecycleReady: false,
+      }),
+    });
+
+    expect(second.boot.snapshot.truthCoreReady).toBe(true);
+    expect(second.boot.snapshot.lmStudioLifecycleReady).toBe(false);
   });
 });
