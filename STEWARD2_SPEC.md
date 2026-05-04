@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **deployment testing paused for structural analysis (2026-05-04). Live testing proved a new blocker: Steward2 autonomy can now boot truthfully, pass policy, and seed real host tasks/flows, but it does not execute them. The missing invariant is a host-owned execution handoff from seeded autonomy work into an active OpenClaw turn. Next step: review the new “Deployment gap — autonomy execution handoff vs OpenClaw in-turn autonomy” section before any code.**
+Current phase: **WS-L merged via PR #27 (2026-05-04). The autonomy execution handoff is now in `main`: seeded host tasks can be claimed, executed through the unified OpenClaw active-turn runtime, and terminalized to `done/failed`. Next step: resume deployment / live evaluation testing against the merged autonomy loop.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -6274,7 +6274,7 @@ Advancement output:
 
 ### Next process step
 
-- `STEWARD2 IMPLEMENT WS-L: implement autonomy-executor.ts and wire into autonomy-bridge cycle`
+- ~~`STEWARD2 IMPLEMENT WS-L: implement autonomy-executor.ts and wire into autonomy-bridge cycle`~~ merged via PR `#27`
 
 ## WS-L implementation gate (2026-05-04)
 
@@ -6360,6 +6360,32 @@ Verification:
 
 Carry-forward:
 - none added by `WS-L` implementation
+
+## WS-L post-merge reconciliation (2026-05-04)
+
+Merge result:
+- `WS-L` merged via PR `#27`
+
+Reconciliation:
+- the deployment blocker recorded in the execution-handoff section is now closed on `main`
+- steward autonomy no longer stops at `seeded`
+- bridge cycle now owns:
+  - boot
+  - tick
+  - execute
+- host tasks seeded by autonomy now have a real path to:
+  - `done`
+  - `failed`
+- runtime evidence for autonomy executions is now visible at both start and completion with:
+  - `triggerSource = autonomy`
+  - `host_task_id`
+
+Decision:
+- autonomy execution tranche is **closed**
+- deployment / live evaluation testing may resume on merged `main`
+
+Next process step:
+- begin deployment / live evaluation testing against the merged autonomy loop
 
 ## LM-A post-advance reconciliation (2026-05-01)
 
