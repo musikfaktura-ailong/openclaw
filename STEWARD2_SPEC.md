@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-N` implemented locally (2026-05-07). Autonomy host-task execution is now bound to an explicit seeded-flow identity pair instead of inferred `task_id` ownership: `seed_flow_id` is persisted on `steward_host_tasks`, seed creation is atomic, claim/execution bind only to `(host_task_id, seed_flow_id)`, and the collision regression now proves runtime flow/task numeric reuse cannot steal autonomy flow ownership. Next step: reviewer gate for `WS-N`.**
+Current phase: **`WS-N` merged via PR #29 (2026-05-07). Autonomy host-task execution is now bound to an explicit seeded-flow identity pair instead of inferred `task_id` ownership: `seed_flow_id` is persisted on `steward_host_tasks`, seed creation is atomic, claim/execution bind only to `(host_task_id, seed_flow_id)`, and the collision regression proves runtime flow/task numeric reuse cannot steal autonomy flow ownership. Next step: resume live deployment testing on merged `main`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,7 +56,7 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing reached the next real live integration boundary after `WS-M`: bounded execution now works, but autonomy flow identity is still not steward-owned tightly enough
+- deployment testing can resume from the autonomy identity boundary on merged `main`
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
