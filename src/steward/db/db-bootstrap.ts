@@ -27,6 +27,13 @@ export function getDb(): DatabaseSync {
   return cachedDb;
 }
 
+export function getStewardDbPath(): string {
+  if (!cachedPath) {
+    throw new Error("Steward DB path is not initialized. Call initStewardDb(storePath) first.");
+  }
+  return cachedPath;
+}
+
 export function closeStewardDb(): void {
   cachedDb?.close();
   cachedDb = null;

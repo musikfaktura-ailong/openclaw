@@ -763,6 +763,40 @@ describe("resolveApiKeyForProvider", () => {
 });
 
 describe("resolveApiKeyForProvider – synthetic local auth for custom providers", () => {
+  it("accepts lmstudio-local from models.json as a runtime-usable local marker", async () => {
+    const resolved = await resolveApiKeyForProvider({
+      provider: "lmstudio",
+      cfg: {
+        models: {
+          providers: {
+            lmstudio: {
+              baseUrl: "http://localhost:1234/v1",
+              api: "openai-completions",
+              apiKey: "lmstudio-local",
+              models: [
+                {
+                  id: "qwen/qwen3-14b",
+                  name: "Qwen 3 14B",
+                  reasoning: false,
+                  input: ["text"],
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                  contextWindow: 32768,
+                  maxTokens: 4096,
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    expect(resolved).toEqual({
+      apiKey: "lmstudio-local",
+      source: "models.json",
+      mode: "api-key",
+    });
+  });
+
   it("synthesizes a local auth marker for custom providers with a local baseUrl and no apiKey", async () => {
     const auth = await resolveCustomProviderAuth(
       "custom-127-0-0-1-8080",

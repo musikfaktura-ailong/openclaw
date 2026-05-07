@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-L merged via PR #27 (2026-05-04). The autonomy execution handoff is now in `main`: seeded host tasks can be claimed, executed through the unified OpenClaw active-turn runtime, and terminalized to `done/failed`. Next step: resume deployment / live evaluation testing against the merged autonomy loop.**
+Current phase: **`WS-M` reviewer gate PASSED (2026-05-07). All six conditions confirmed: autonomy timeout ownership explicit and lane-scoped, watchdog at correct steward seam, stream-phase evidence persisted, timeout breach terminalizes all three layers, completion timestamps no longer stale, user-turn contract intact. Ready to advance past WS-M advancement gate.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,7 +56,7 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing is paused until LM Studio lifecycle ownership and the autonomous steward control-loop map are accepted in this spec
+- deployment testing unblocked: `WS-M` reviewer gate passed; next live pass may proceed once advancement gate conditions are confirmed met
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -5838,6 +5838,958 @@ Why:
 
 Next process step:
 - begin deployment / live evaluation testing
+
+## Live deployment follow-up — donor-parity LM query path + truthful autonomy terminalization (2026-05-05)
+
+Why this section exists:
+- deployment resumed after `RD-1` and `WS-L`
+- the steward now seeded and claimed real autonomy work live, but two new runtime-truth gaps appeared
+- this section records what was a real Steward2 code bug, what was a real LM Studio environment failure, and what was fixed before the next deployment pass
+
+### Live findings from the resumed deployment
+
+Confirmed live:
+- steward boot succeeded
+- autonomy boot/tick ran
+- `assistant_plus_autonomy` mode allowed real seeded work
+- new `steward_host_tasks` and linked flows/tasks were created and executed
+- the old migration copy bug and stale triage-artifact path bug were no longer blocking execution
+
+But two live gaps appeared:
+
+1. `LM-LIVE-1` — donor-parity LM Studio query identity was still incomplete
+   - Steward2 correctly owned `load/unload` lifecycle sequencing
+   - but the actual OpenAI-compatible inference payload still used the configured model ID instead of the loaded LM Studio `instance_id`
+   - original PEQS / `OLD_AI` behavior did not stop at load ownership; it queried the active loaded instance
+
+2. `EXEC-LIVE-1` — autonomy host-task terminalization was too optimistic
+   - `autonomy.execution.completed` was emitted when the embedded run returned without throwing
+   - but the underlying steward runtime for those same turns could still finish with:
+     - rejected proof
+     - hollow task value
+     - `terminalTaskStatus = failed`
+   - that violates the steward truth invariant: host-task completion must derive from the steward's terminal runtime/proof verdict, not from "embedded run returned"
+
+### Donor re-check performed before patching
+
+Re-checked donor files:
+- `C:\ai_agent\PEQS\core\model_manager.py`
+- `C:\ai_agent\OLD_AI\core\lm_studio_manager.py`
+
+Confirmed donor invariant:
+- load via LM Studio model identity
+- unload-before-switch
+- track the loaded instance identity
+- query the active local model using the loaded LM Studio `instance_id`, not only the configured model reference
+
+So the correct fix was not "add more tolerance for load failures"; it was:
+- restore donor-exact transport identity behavior on the local inference path
+
+### LM-LIVE-1 implementation (local, verified)
+
+Files changed:
+- `src/plugins/provider-runtime-model.types.ts`
+- `src/steward/lmstudio/lifecycle-bridge.ts`
+- `src/steward/lmstudio/embedded-runner-seam.ts`
+- `src/agents/openai-transport-stream.ts`
+- `src/steward/lmstudio/lifecycle-bridge.test.ts`
+- `src/agents/openai-transport-stream.test.ts`
+- `src/agents/pi-embedded-runner/run/attempt.test.ts`
+
+What changed:
+- provider runtime model now supports an optional transport-only model override:
+  - `transportModelId`
+- steward lifecycle bridge now returns the real inference query identity:
+  - `queryModelId`
+- after lifecycle reconciliation, local LM inference resolves the loaded LM Studio instance and carries that ID forward into the actual OpenAI-compatible completions payload
+- embedded-runner seam now injects the transport override only for the transport layer; outer model-selection semantics stay unchanged
+
+Invariant after the patch:
+- **load/unload policy is steward-owned**
+- **local inference queries the loaded LM Studio instance ID**
+- **remote/API models still bypass LM Studio lifecycle ownership**
+
+### EXEC-LIVE-1 implementation (local, verified)
+
+Files changed:
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+
+What changed:
+- autonomy executor no longer terminalizes host tasks as `completed` merely because the embedded runner returned
+- it now derives the host-task outcome from the steward terminal runtime link state in `steward_flow_tasks.link_status`
+- only `link_status = 'succeeded'` maps to host-task completion
+- all other terminal outcomes map to host-task failure
+
+Invariant after the patch:
+- **host-task truth accounting is downstream of the steward terminal runtime/proof path**
+- **no more optimistic `autonomy.execution.completed` for rejected/failed turns**
+
+### What turned out not to be a steward code-path bug
+
+LM Studio was reachable throughout the live test.
+
+Manual API checks confirmed:
+- `GET /api/v1/models` worked
+- `GET /v1/models` worked
+
+LM Studio server logs then showed the remaining live failure:
+- KV cache allocation failure
+- `cudaMalloc failed: out of memory`
+
+Meaning:
+- the steward had a real donor-parity query-identity bug, and that is now patched
+- but the current live load failure is also a real LM Studio environment/memory failure, not just a bad steward endpoint or missing load call
+
+### Verification completed for the local patches
+
+TypeScript:
+- `node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit`
+  - PASS
+
+Focused tests:
+- `corepack pnpm exec vitest run src/steward/lmstudio/lifecycle-bridge.test.ts`
+  - PASS
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-executor.test.ts`
+  - PASS
+- `corepack pnpm exec vitest run src/agents/pi-embedded-runner/run/attempt.test.ts -t wrapStreamFnWithStewardLmstudioLifecycle`
+  - PASS
+- `corepack pnpm exec vitest run src/agents/openai-transport-stream.test.ts -t "uses transportModelId override"`
+  - PASS
+
+Known unrelated test noise:
+- the full `attempt.test.ts` file still has an older Windows path-separator failure in `remapInjectedContextFilesToWorkspace`
+- that is unrelated to `LM-LIVE-1` or `EXEC-LIVE-1`
+
+### Current post-patch live position
+
+Structural status:
+- autonomy execution handoff exists and now reaches real execution
+- donor-parity LM Studio transport identity is patched locally
+- host-task terminal truth accounting is patched locally
+
+Remaining live blocker before "useful thinking" can be judged:
+- LM Studio must successfully load the configured local model in the current machine memory conditions
+
+Next process step:
+- reconcile/commit the local deployment fixes
+- rerun live deployment and confirm:
+  - local LM Studio inference payload uses the loaded `instance_id`
+  - autonomy host-task terminal events now match steward runtime terminal truth
+
+## Live deployment follow-up — why the same LM Studio models worked in PEQS but fail now in Steward2 (2026-05-06)
+
+Why this section exists:
+- the machine, LM Studio, and model files are not enough to explain the current failure
+- the original PEQS steward did use these same families of local models successfully
+- so the question is not "can this machine ever load them"; it is "what exact role/load contract did PEQS use that Steward2 is still violating"
+
+### Donor re-check: PEQS effective local model contract
+
+Re-checked donor files:
+- `C:\ai_agent\PEQS\config.json`
+- `C:\ai_agent\PEQS\config.test_steward_live_liv04.json`
+- `C:\ai_agent\PEQS\core\model_manager.py`
+
+Confirmed PEQS model-role contract:
+- `primary_model` = `qwen/qwen3-14b`
+- `critic_model` = `mistralai_ministral-3-14b-reasoning-2512@q6_k`
+- `code_critic_model` = `deepseek-coder-33b-instruct`
+- `adjudicator_model` = `mistralai_ministral-3-14b-reasoning-2512@q8_0`
+
+Confirmed PEQS load contract:
+- one local non-embedding model loaded at a time
+- if the target model is already loaded with enough context, reuse it
+- if the target model is loaded with too-small context, unload and reload it
+- otherwise unload the conflicting loaded model and load the target
+- **minimum requested load context is fixed at `8192`**
+- PEQS queries the loaded `instance_id`, not just the configured model name
+
+Critical donor fact:
+- PEQS did **not** treat `mistralai_ministral-3-14b-reasoning-2512@q6_k` as the general primary thinking lane
+- it was the **critic** lane
+- the normal primary lane was `qwen/qwen3-14b`
+
+### Current Steward2 live contract that produced the failure
+
+Re-checked live dev agent config:
+- `C:\Users\kevin\.openclaw-dev\agents\dev\agent\models.json`
+
+Confirmed live LM Studio provider order:
+1. `mistralai_ministral-3-14b-reasoning-2512@q6_k`
+2. `mistralai_ministral-3-14b-reasoning-2512@q8_0`
+3. `deepseek-coder-33b-instruct`
+4. `qwen/qwen3-14b`
+5. `qwen/qwen2.5-coder-14b`
+6. `deepseek-r1-distill-qwen-14b`
+
+Confirmed live context metadata:
+- both Ministral entries advertise `contextTokens = 64000`
+- `qwen/qwen3-14b` advertises `contextTokens = 32768`
+
+Confirmed Steward2/OpenClaw default load behavior:
+- `extensions/lmstudio/src/defaults.ts` sets `LMSTUDIO_DEFAULT_LOAD_CONTEXT_LENGTH = 64000`
+- the embedded runner seam derives `requestedContextLength` from model metadata in this order:
+  - `contextTokens`
+  - `contextWindow`
+  - fallback token budget
+- the LM Studio provider then loads with that explicit `requestedContextLength`
+
+So the live failure was not "LM Studio suddenly forgot how to load Ministral."
+
+It was this specific contract drift:
+1. Steward2 imported a generic OpenClaw LM Studio catalog where the first registered local models were the PEQS critic/adjudicator models.
+2. Steward2's earlier autonomy path was not yet enforcing the PEQS role map strongly enough, so the autonomy lane could resolve onto the critic model family.
+3. Once that happened, Steward2 also inherited that model entry's `contextTokens = 64000`.
+4. Steward2 then asked LM Studio to load that critic model at `64000` context, not the PEQS minimum `8192`.
+5. LM Studio refused that heavier load shape on the current machine state.
+
+### Why this can fail now even if the same models worked before
+
+Because "same model file exists" is not the invariant.
+
+The real invariant is:
+- **same model role**
+- **same requested load size**
+- **same query identity**
+
+PEQS and the failing Steward2 run were not equivalent on those terms:
+- role drift:
+  - PEQS primary lane = `qwen/qwen3-14b`
+  - failing Steward2 lane hit the PEQS critic model family first
+- load-size drift:
+  - PEQS asked LM Studio for `8192`
+  - failing Steward2 asked LM Studio for `64000`
+- query identity drift:
+  - PEQS queried the loaded `instance_id`
+  - Steward2 originally queried only the configured model key until `LM-LIVE-1` was patched
+
+So the failure is causal, not mysterious:
+- Steward2 changed the effective load contract
+- the machine then rejected the heavier contract
+
+### Problem statement
+
+`LM-LIVE-2` — Steward2 still lacks donor-exact PEQS role/load-size parity on the local LM Studio path.
+
+Concretely:
+- model role selection and context-load defaults are still being inferred from generic OpenClaw-style provider metadata
+- they are not yet derived from the original steward's role contract
+- therefore the same installed models can be asked to run in the wrong lane and at the wrong load size
+
+### Possible structural fix
+
+This is the likely correct fix path before more live deployment claims:
+
+1. Port the PEQS model-role contract explicitly into Steward2 steward-owned runtime selection.
+   - `primary_local` autonomy / general steward execution -> `qwen/qwen3-14b`
+   - `critic_local` -> `mistralai_ministral-3-14b-reasoning-2512@q6_k`
+   - code-critic lane -> `deepseek-coder-33b-instruct`
+   - adjudication/proof lane -> `mistralai_ministral-3-14b-reasoning-2512@q8_0`
+   - do not infer steward role from provider list order
+
+2. Port the PEQS load-size contract explicitly into the Steward2 LM Studio lifecycle seam.
+   - donor-parity baseline requested load context for local inference = `8192`
+   - larger context is an explicit steward override, not the default derived from provider metadata
+   - `contextTokens` / `contextWindow` remain capability ceilings, not automatic load targets
+
+3. Re-verify live behavior against the donor contract.
+   - autonomy primary execution should request `qwen/qwen3-14b`
+   - the load event should request the steward-owned default, not the provider metadata default
+   - the actual inference query must still use the loaded `instance_id`
+
+### Immediate compromise implemented locally
+
+For Steward2 live bring-up, the local inference load target is now:
+- **`16384` by default**
+
+Why this compromise was chosen:
+- `8192` is PEQS-safe donor parity
+- `64000` proved too heavy for the current live Mistral load shape
+- `16384` is a deliberate middle ground:
+  - larger than PEQS minimum
+  - materially smaller than the failing `64000`
+  - still steward-owned instead of catalog-owned
+
+Current invariant after the local patch:
+- local inference load size no longer comes from `contextTokens` / `contextWindow`
+- provider metadata remains capability information only
+- steward runtime now chooses the load target
+
+Current implemented Steward2 compromise:
+- donor baseline remains documented as `8192`
+- live local implementation currently uses `16384`
+- any future move back down to `8192` or up to `32768` must be an explicit steward decision, not a provider-catalog side effect
+
+### What not to do
+
+Do not treat this as:
+- random LM Studio instability
+- a generic "handle load failure better" task
+- proof that the machine can no longer run these models
+
+That would miss the real invariant failure: Steward2 is still not asking LM Studio the same question that PEQS asked.
+
+## Live deployment follow-up — unbounded active-turn continuation after correct LM Studio handoff (2026-05-06)
+
+Why this section exists:
+- the LM Studio role/load-size bug is now fixed live
+- the steward now reaches the intended local model with the intended steward-owned load target
+- but the next live failure is now a different class:
+  - autonomy continuations can run for very long periods with no bounded steward timeout
+  - and autonomy completion evidence currently records false chronology because it reuses a stale cycle-start timestamp
+
+### Live sequence confirmed on the fresh post-fix deployment
+
+Confirmed live on the restarted `--dev gateway` process:
+- gateway health returned `ok: true`
+- autonomy mode remained `assistant_plus_autonomy`
+- after clearing stale cooldown / stale-running debris, a fresh autonomy turn started:
+  - `autonomy.execution.requested`
+  - `provider = lmstudio`
+  - `model = qwen/qwen3-14b`
+- runtime authority promoted the turn:
+  - `runtime.started`
+- LM Studio lifecycle then executed correctly:
+  - `lmstudio.lifecycle.lock_wait_started`
+  - `lmstudio.lifecycle.lock_acquired`
+  - `lmstudio.lifecycle.lock_released`
+  - `requiredContextLength = 16384`
+  - `targetModelKey = qwen/qwen3-14b`
+  - `action = noop`
+  - reason: model already loaded with sufficient context
+- query lock then executed:
+  - `lmstudio.lifecycle.query_lock_wait_started`
+  - `lmstudio.lifecycle.query_lock_acquired`
+  - `lmstudio.lifecycle.query_lock_released`
+
+The live transcript and ledger now show a narrower failure than this first summary captured:
+- the first assistant call did complete
+- that first call produced a real `web_fetch` tool call
+- the tool executed and the tool result persisted into the transcript
+- steward also persisted `tool.postcheck.normalized`
+- then a **second** LM Studio continuation started
+- that second continuation reached:
+  - `lmstudio.lifecycle.lock_wait_started`
+  - `lmstudio.lifecycle.lock_acquired`
+  - `lmstudio.lifecycle.lock_released`
+  - `lmstudio.lifecycle.query_lock_wait_started`
+  - `lmstudio.lifecycle.query_lock_acquired`
+  - `lmstudio.lifecycle.query_lock_released`
+
+The first live reading made that second continuation look like a hard hang because a 45-second window showed:
+- no `runtime.idle`
+- no proof / task-value / control completion evidence
+- runtime state still `running`
+- host task and flow-task link still non-terminal
+
+But a deeper read of the same live transcript proved something more precise:
+- the second continuation **did** eventually finish
+- it produced the final assistant message at roughly `2026-05-06T13:46:27Z`
+- the transcript therefore advanced through:
+  - first assistant response
+  - tool result persistence
+  - second assistant continuation
+  - final assistant message
+
+So the failure is no longer described accurately as:
+- “the second continuation never returned”
+
+The accurate description is:
+- the second continuation was **extremely slow / effectively unbounded for steward purposes**
+- and the host lacked a bounded autonomy timeout contract that would make that acceptable or recoverable
+
+### Transcript-state correction
+
+The earlier note that the transcript file itself was absent is no longer accurate.
+
+Confirmed live:
+- `C:\Users\kevin\.openclaw-dev\agents\dev\sessions\337393df-cdcc-46dd-be64-083db65d901c.jsonl`
+  exists
+- it contains:
+  - session header
+  - model snapshot
+  - autonomy user message
+  - assistant response with `web_fetch`
+  - persisted `toolResult`
+
+So the failure is **not** “the transcript never materialized”.
+The real breakpoint is:
+- the transcript/session advances through one full tool-result cycle
+- the continuation phase can take many minutes with no steward-owned bounded timeout
+
+### Additional live symptom
+
+The session store row for `agent:dev:main` points at:
+- `C:\Users\kevin\.openclaw-dev\agents\dev\sessions\337393df-cdcc-46dd-be64-083db65d901c.jsonl`
+
+The `.lock` file also remains present during the stuck run.
+
+This no longer indicates transcript creation failure.
+What it does indicate is:
+- the active run is still holding session machinery open while the turn remains non-terminal
+
+### Live chronology correction from the steward DB
+
+The first DB read also appeared to show this:
+- host task `1287` remained `running`
+- then later it looked as if `autonomy.execution.completed` and host-task `done` happened before `runtime.idle`
+
+Deeper DB inspection corrected that too.
+
+What actually happened for host task `1287`:
+- `runtime.idle` exists
+- `proof.accepted` exists
+- `mission.task_value.adjudicated` exists
+- governor / self-improvement / mission audit completion exists
+- flow-task link for `1287` is `succeeded`
+- host task `1287` is now `done`
+
+But the timestamps on the autonomy-side completion records are false.
+
+Confirmed from code:
+- `runAutonomyExecuteCycle()` captures one `now` at cycle start
+- after the long run completes, it still passes that original `now` into:
+  - `terminalizeAutonomyTask()`
+  - `autonomy.execution.completed` / `autonomy.execution.failed`
+  - `steward_host_tasks.completed_at` / `failed_at`
+
+That creates false chronology:
+- the host task looks completed at cycle-start time
+- `autonomy.execution.completed` looks earlier than `runtime.idle`
+- but in reality it is only emitted after the post-turn proof/value/control chain finishes
+
+So there are **two separate truth problems** here:
+1. autonomy execution has no bounded steward timeout contract for slow continuations
+2. autonomy completion timestamps are written with stale cycle-start time, falsifying ledger chronology
+
+### Exact violated invariant
+
+Once a steward turn is promoted to `runtime.started`, the host must guarantee one of two terminal outcomes within bounded time:
+- `runtime.idle` with terminal proof/value state
+- or a host-owned timeout/failure terminalization that returns runtime, flow, and host-task state to truth
+
+That invariant is currently false.
+
+Today the system can do this:
+- start a real autonomy turn
+- pass the LM Studio lifecycle seam correctly
+- spend many minutes inside a continuation with no bounded autonomy timeout
+- keep runtime truth in `running` during that entire window
+
+And separately it can do this:
+- complete a turn correctly
+- then write autonomy completion timestamps that falsely imply completion happened much earlier than `runtime.idle`
+
+### Exact code path where the invariant breaks
+
+The live path is:
+1. `runAutonomyExecuteCycle()` in `src/steward/autonomy/autonomy-executor.ts`
+2. `recordStewardTurnStart()` writes `runtime.started`
+3. `runEmbeddedPiAgent(runParams)` is awaited
+4. only **after** that promise resolves does steward call:
+   - `updateSessionStoreAfterAgentRun()`
+   - which then calls `recordTurnComplete()`
+   - which then writes `runtime.idle` and terminal proof/task-value/control state
+
+So the current ownership boundary is:
+- before runner return: OpenClaw owns the active run
+- after runner return: steward resumes ownership and terminalizes
+
+The structural hole is:
+- there is no host-owned watchdog between those two points
+- if `runEmbeddedPiAgent()` takes too long to resolve, steward has no autonomy-specific bounded deadline
+
+There is also a separate truth bug after runner return:
+- `terminalizeAutonomyTask()` receives the cycle-start `now`
+- so completion evidence is timestamped as if it happened near cycle start instead of actual completion time
+
+### Why the old PEQS steward did not have this exact failure shape
+
+PEQS local model execution was synchronous in structure:
+- `ModelManager.call()` -> local model call -> return text / return failure
+
+Even when LM Studio had lifecycle complexity, the stewardship layer still owned a bounded call/return contract.
+
+OpenClaw is different:
+- provider execution is stream-based
+- session/transcript/store updates happen downstream of the stream run
+- completion is not a single synchronous text return
+
+So Steward2 cannot rely on PEQS assumptions here.
+It needs a steward-owned runtime watchdog on top of OpenClaw's stream runtime.
+
+### What this diagnosis rules out
+
+This is **not** the same problem as the earlier LM Studio bug.
+
+What is now confirmed correct:
+- local provider = `lmstudio`
+- local model = `qwen/qwen3-14b`
+- required lifecycle context = `16384`
+- wrong `64000` Mistral load path is no longer the active failure
+
+So the remaining problem is downstream of the lifecycle handoff.
+
+### Timeout inheritance bug found in the deeper trace
+
+The first pass assumed this run should have hit a short default LLM idle-timeout.
+That assumption was wrong.
+
+Confirmed from code + live config:
+- `materializeAutonomyTurnParams()` sets:
+  - `timeoutMs: resolveAgentTimeoutMs({ cfg: executionConfig })`
+- live `openclaw.json` sets neither:
+  - `agents.defaults.timeoutSeconds`
+  - `agents.defaults.llm.idleTimeoutSeconds`
+- `resolveAgentTimeoutMs()` default is:
+  - `48 * 60 * 60` seconds = **48 hours**
+- `resolveLlmIdleTimeoutMs()` falls back to:
+  - explicit `agents.defaults.llm.idleTimeoutSeconds`
+  - else explicit run timeout override
+  - else `agents.defaults.timeoutSeconds`
+
+So the autonomy lane currently inherits an assistant-oriented timeout contract of roughly **48 hours**.
+
+That means:
+- the second post-tool continuation did not violate any real short timeout
+- the steward can legitimately stay `running` for two days before the runner times out
+- a live continuation that takes 15-20 minutes is therefore not “wrong” by the inherited contract, even though it is wrong for steward autonomy
+
+This is a structural mismatch:
+- OpenClaw’s generic assistant defaults are acceptable for human-triggered coding turns
+- they are not acceptable for steward-owned autonomous execution truth
+
+### Narrowed live failure zone
+
+The exact unresolved seam is the segment after:
+- `lmstudio.lifecycle.query_lock_released`
+
+and before:
+- `updateSessionStoreAfterAgentRun()`
+- `recordTurnComplete()`
+
+Confirmed / likely sub-zones inside that gap:
+- the provider call can take a very long time before first useful continuation event
+- the iterator idle-timeout is logically present, but its inherited `48h` budget makes it non-protective for autonomy
+- the continuation is therefore operationally unbounded from the steward perspective
+
+What is no longer supported by the live evidence:
+- “the second continuation never terminalized at all” for host task `1287`
+
+What is still unresolved for the currently active maintenance task `1288`:
+- it is still in `runtime.started`
+- LM lifecycle/query-lock completed
+- no terminal steward evidence exists yet
+- so the same unbounded continuation class is still live on the next task
+
+### Consequence map
+
+Because this invariant is broken, the following downstream failures become possible:
+
+1. Runtime truth can remain false for operationally unacceptable windows.
+   - `steward_runtime_state.status = running` for many minutes or potentially hours
+   - no bounded autonomy recovery
+
+2. Autonomy host truth inherits assistant-shell timeout assumptions.
+   - the steward can wait ~48h before the runner times out
+   - this makes autonomous recovery operationally false even when the code path is hung
+
+3. Host tasks and flow links remain non-terminal during that long window.
+   - `steward_host_tasks.status = running`
+   - `steward_flow_tasks.link_status = running`
+
+4. Proof / task-value / control ticks never happen.
+   - no proof verdict
+   - no task-value label
+   - no metacog / maintenance / self-improvement completion for that turn
+
+5. Future autonomy runs get polluted by stale state.
+   - duplicate suppression
+   - cooldown churn
+   - stale-running cleanup becomes manual instead of structural
+
+6. Session/transcript state can remain open across a non-terminal continuation.
+   - lock file present
+   - transcript stops after tool-result phase with no terminal assistant state
+
+7. Ledger chronology becomes false even when the turn eventually succeeds.
+   - `autonomy.execution.completed` uses stale cycle-start `now`
+   - `steward_host_tasks.completed_at` / `failed_at` use stale cycle-start `now`
+   - chronology between:
+     - `runtime.started`
+     - LM lifecycle events
+     - `runtime.idle`
+     - host-task completion
+     becomes analytically false
+
+### Proposed structural fix
+
+Do not patch this as "just add another local catch."
+
+The correct fix shape is:
+
+1. Split timeout ownership by lane.
+   - autonomy execution must not inherit OpenClaw’s generic 48h assistant timeout
+   - steward must define:
+     - bounded autonomy run timeout
+     - bounded autonomy LLM idle-timeout
+   - these must be explicit steward-owned contracts, not implicit provider/runtime fallbacks
+
+2. Add a steward-owned active-turn watchdog for promoted runtime turns.
+   - starts at `runtime.started`
+   - applies to autonomy turns at minimum
+   - should probably apply to all steward-promoted turns
+
+3. Add explicit phase evidence between lifecycle handoff and terminalization.
+   - `runtime.stream_started`
+   - `runtime.stream_first_event`
+   - `runtime.stream_terminal`
+   - or equivalent steward-owned events
+
+4. Add bounded host recovery if terminal completion never arrives.
+   - deadline should derive from:
+     - autonomy LLM idle-timeout
+     - or autonomy overall run timeout
+     - plus a small host grace window
+   - on deadline breach:
+     - abort active run
+     - mark runtime idle
+     - fail flow/task link
+     - fail host task
+     - append explicit timeout/failure evidence
+
+5. Make transcript/session materialization part of the evidence chain.
+   - if a run is marked started, transcript state must advance or the host must record why not
+
+6. Fix autonomy completion chronology.
+   - `terminalizeAutonomyTask()` must use actual completion time, not cycle-start `now`
+   - `autonomy.execution.completed` / `autonomy.execution.failed` must reflect real emission time
+   - host-task `completed_at` / `failed_at` must align with real terminalization order relative to `runtime.idle`
+
+### Why OpenClaw did not “already solve this”
+
+OpenClaw’s default timeout behavior is rational for:
+- human-triggered interactive turns
+- long-running coding work
+
+It is not sufficient for:
+- steward-owned autonomous execution
+- where runtime truth must recover quickly from a non-terminal continuation
+
+So the bug is not:
+- “OpenClaw forgot timeouts”
+
+The bugs are:
+- Steward2 reused OpenClaw’s assistant defaults in a stewardship lane that needs its own bounded execution contract
+- Steward2 also reused cycle-start wall-clock time when writing autonomy completion evidence, which breaks chronology truth
+
+### Required next work before code
+
+Before patching, the spec must open a new execution-reliability slice that defines:
+- intended invariant
+- host-owned deadline contract
+- exact terminal event contract
+- truthful completion timestamp contract
+- whether watchdog ownership lives in:
+  - steward runtime bridge
+  - autonomy executor
+  - or a shared active-run supervisor
+
+Until that exists, the steward is still not deployment-ready for autonomous live thinking, even though the LM Studio model/load selection bug is fixed.
+
+### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
+
+Why this slice exists:
+- `WS-L` solved seed -> claim -> execute handoff into the unified OpenClaw runtime
+- live testing then proved the next missing invariant:
+  - autonomy execution still inherits human-assistant timeout defaults
+  - host recovery is not bounded for very slow continuations
+  - autonomy completion events/timestamps do not yet tell the truth about when completion actually happened
+- this slice is therefore not “another patch after WS-L”
+- it is the missing host-owned execution reliability contract for steward autonomy
+
+Implementer: Codex
+
+Reviewer: Claude
+
+#### Intended invariant
+
+For every autonomy-promoted turn:
+- `runtime.started` must lead to one of two bounded outcomes:
+  - `runtime.idle` with terminal proof/value/control state
+  - or explicit steward-owned timeout/failure terminalization
+- autonomy-specific timeouts must be steward-owned, not inherited implicitly from OpenClaw assistant defaults
+- host-task completion chronology must be truthful:
+  - `autonomy.execution.completed` / `failed`
+  - `steward_host_tasks.completed_at` / `failed_at`
+  - `runtime.idle`
+  must reflect actual terminalization order, not cycle-start wall-clock reuse
+
+#### Target OpenClaw seam
+
+- OpenClaw still owns in-turn agent execution:
+  - `runEmbeddedPiAgent(...)`
+  - stream/provider loop
+  - session transcript persistence
+- Steward owns the autonomy reliability contract around that seam:
+  - autonomy-specific timeout contract
+  - watchdog / bounded recovery
+  - execution-phase ledger evidence
+  - truthful autonomy terminalization timestamps
+
+#### PEQS source modules
+
+- `C:\ai_agent\PEQS\core\controller.py`
+- `C:\ai_agent\PEQS\core\model_manager.py`
+- `C:\ai_agent\PEQS\core\lm_studio_manager.py`
+- `C:\ai_agent\PEQS\core\runtime_flow.py`
+
+PEQS donor lesson:
+- execution was bounded by a synchronous host-owned call/return contract
+- Steward2 must recreate the bounded host contract even though OpenClaw execution is stream-based
+
+#### Steward2 target modules
+
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+- `src/steward/runtime/session-bridge.ts`
+- `src/steward/runtime/runtime-state-repo.ts`
+- `src/steward/runtime/runtime-events.ts`
+- `src/steward/db/runtime-schema.ts`
+- optional new steward-owned helper if needed:
+  - `src/steward/autonomy/autonomy-timeouts.ts`
+  - `src/steward/autonomy/autonomy-watchdog.ts`
+
+#### Dependency list
+
+- current `WS-L` autonomy execution bridge on `main`
+- current LM lifecycle tranche `LM-A` through `LM-D` on `main`
+- `RD-1` truthful startup readiness already merged
+- live dev DB/transcript evidence from:
+  - `C:\Users\kevin\.openclaw-dev\agents\dev\sessions\steward.db`
+  - `C:\Users\kevin\.openclaw-dev\agents\dev\sessions\337393df-cdcc-46dd-be64-083db65d901c.jsonl`
+
+#### Host-owned decisions for this slice
+
+1. Timeout ownership
+   - autonomy turns get explicit steward-owned timeout values
+   - they do not inherit the 48h assistant default
+   - both of these must be owned in steward autonomy configuration/materialization:
+     - overall autonomy run timeout
+     - autonomy LLM idle-timeout
+
+2. Watchdog ownership
+   - watchdog ownership belongs in the steward autonomy layer, not generic OpenClaw user-turn execution
+   - `autonomy-executor.ts` is the primary owner because it is the seam that:
+     - claims the host task
+     - starts the autonomy run
+     - knows the host-task / flow / runtime IDs that must be terminalized on breach
+
+3. Stream-phase evidence
+   - this slice must add steward-owned events for the execution phase after `runtime.started`
+   - minimum contract:
+     - `runtime.stream_started`
+     - `runtime.stream_first_event`
+     - `runtime.stream_terminal`
+   - these are evidence events, not planner/model semantics
+
+4. Truthful chronology ownership
+   - `terminalizeAutonomyTask()` must use actual terminalization time
+   - autonomy completion events must never reuse cycle-start `now`
+   - host-task timestamps and emitted event timestamps must agree with real completion order
+
+5. Failure terminalization ownership
+   - if an autonomy run breaches the bounded timeout contract:
+     - abort active run
+     - mark runtime idle with error
+     - complete the flow-task as failed
+     - fail the host task
+     - emit explicit autonomy timeout evidence
+
+#### Scope of implementation
+
+This slice must deliver all of the following:
+
+1. Explicit autonomy timeout contract
+   - autonomy turn params must no longer inherit the implicit 48h default
+   - steward-owned run timeout and LLM idle-timeout must be materialized explicitly for autonomy runs
+
+2. Execution-phase evidence
+   - add steward events showing:
+     - execution handoff actually started
+     - first stream/event was seen
+     - execution terminalized
+
+3. Bounded watchdog / recovery
+   - if the autonomy run exceeds its steward-owned bound, the host must reclaim truth
+   - no autonomy run may leave runtime/host-task/flow-task indefinitely non-terminal
+
+4. Chronology fix
+   - host task terminal timestamps must be written at actual completion/failure time
+   - `autonomy.execution.completed` / `failed` must reflect real emission time
+
+5. No user-turn regression
+   - this slice must not change the timeout contract for ordinary user-triggered OpenClaw turns
+   - the contract change is autonomy-lane scoped
+
+#### `WS-M` implementation record (2026-05-06)
+
+Delivered locally:
+- `src/steward/autonomy/autonomy-executor.ts`
+  - autonomy runs now materialize steward-owned timeout values explicitly:
+    - run timeout = `45m`
+    - LLM idle timeout = `20m`
+  - autonomy runs are wrapped in a steward-owned watchdog
+  - timeout breach aborts the active run and terminalizes:
+    - runtime state
+    - flow-task link
+    - host task
+  - added execution-phase evidence:
+    - `runtime.stream_started`
+    - `runtime.stream_first_event`
+    - `runtime.stream_terminal`
+  - autonomy completion/failure terminalization now uses real terminal time, not cycle-start `now`
+- `src/steward/db/runtime-schema.ts`
+  - typed event kinds added for the new stream-phase evidence
+- `src/steward/autonomy/autonomy-bridge.ts`
+  - bridge now accepts and forwards the explicit autonomy model-resolver seam into execution
+- `src/steward/autonomy/autonomy-executor.test.ts`
+  - added timeout-ownership coverage
+  - added watchdog recovery coverage
+  - added chronology truth assertions
+- `src/steward/autonomy/autonomy-bridge.test.ts`
+  - updated full seed->execute harness to use grounded proof text and explicit autonomy model-resolver deps
+
+Structural note discovered during implementation:
+- the original `WS-M` success-path test hang was not caused by the new watchdog/chronology logic itself
+- the real hidden blocker was pre-run autonomy materialization:
+  - `resolveAutonomyModelRef()` hit heavyweight agent-registry discovery before the explicit/discovered LM Studio seam
+  - that made the executor/bridge tests stall before the active turn even started
+- structural correction:
+  - autonomy model resolution now prefers:
+    1. explicit/configured local LM Studio model
+    2. discovered LM Studio model via the explicit resolver seam
+    3. registry crawl only as a later fallback
+  - the bridge also exposes `modelResolverDeps` so tests and future host-controlled seams can stay deterministic without forcing registry side-effects
+
+This matters because:
+- the bounded-runtime invariant is not complete if pre-run autonomy materialization can still stall indefinitely
+- the autonomy lane now has a deterministic materialization path before execution begins
+
+#### Out of scope
+
+- changing general OpenClaw user-turn timeouts
+- redesigning provider stream internals
+- proving the exact root cause of every slow LM Studio continuation
+- changing proof/task-value semantics themselves
+
+#### Focused acceptance evidence
+
+Before this slice may advance, all of the following must be visible:
+
+1. Fast autonomy success path
+   - `runtime.started`
+   - `runtime.stream_started`
+   - `runtime.stream_first_event`
+   - `runtime.stream_terminal`
+   - `runtime.idle`
+   - host task status = `done`
+   - host-task `completed_at` is >= the real runtime completion phase, not cycle-start time
+   - `autonomy.execution.completed` timestamp/order is truthful relative to `runtime.idle`
+
+2. Slow/stalled autonomy path
+   - simulated or mocked long continuation breaches the steward-owned timeout
+   - host emits explicit timeout/failure evidence
+   - runtime returns to `idle`
+   - flow-task becomes `failed`
+   - host task becomes `failed`
+   - no stale `running` state remains
+
+3. User-turn isolation
+   - non-autonomy runs do not inherit the new bounded autonomy contract by accident
+
+4. Chronology proof
+   - a regression test must prove that completion timestamps are captured at actual terminalization time, not at cycle-start time
+
+#### Required verification
+
+- `node --max-old-space-size=8192 .\\node_modules\\typescript\\bin\\tsc --noEmit`
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-executor.test.ts src/steward/runtime/ws-a.integration.test.ts`
+- add any new focused watchdog/timestamp tests in:
+  - `src/steward/autonomy/autonomy-executor.test.ts`
+  - or a new dedicated steward autonomy reliability test file if the executor test becomes overloaded
+
+#### `WS-M` local verification record (2026-05-06)
+
+Passed:
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-executor.test.ts`
+  - `11/11` tests
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-bridge.test.ts`
+  - `7/7` tests
+- `corepack pnpm exec vitest run src/steward/runtime/ws-a.integration.test.ts`
+  - `5/5` tests
+- `corepack pnpm exec vitest run src/steward/control/maintenance-governor.test.ts`
+  - `3/3` tests
+- `node --max-old-space-size=8192 .\\node_modules\\typescript\\bin\\tsc --noEmit`
+  - PASS
+
+Why the verification record is split by file instead of one batched Vitest command:
+- the single batched run was noisy and hit Windows execution overhead in this environment
+- each required focused surface was rerun directly and passed cleanly
+
+#### Implementer delivery rule
+
+Codex stops at:
+- implementation complete
+- spec updated
+- focused verification run
+- branch ready for reviewer gate
+
+Codex does **not** advance or merge this slice before Claude records:
+- structural PASS
+- no blocker findings against the invariant above
+
+#### WS-M reviewer gate
+
+Reviewer must confirm:
+- autonomy timeout ownership is explicit and lane-scoped
+- watchdog ownership sits at the correct steward seam
+- stream-phase evidence is persisted and queryable
+- timeout breach always terminalizes runtime / flow-task / host-task truthfully
+- host-task completion timestamps are no longer stale
+- user-turn execution contract was not accidentally narrowed
+
+Reviewer reports:
+- `PASS`
+- or `FAIL`
+- with structural findings only
+
+#### WS-M reviewer gate result (2026-05-07)
+
+**PASS** — all six conditions satisfied.
+
+- **Autonomy timeout ownership explicit and lane-scoped:** `hydrateAutonomyExecutionConfigForSelectedProvider` injects 45m run timeout and 20m LLM idle timeout into the config before agent launch. `materializeAutonomyTurnParams` test (`ws-m-timeouts`) asserts `timeoutMs=45*60*1000`, `timeoutSeconds=45*60`, `idleTimeoutSeconds=20*60` — not inherited from any caller.
+- **Watchdog at the correct steward seam:** stall test mocks `runAgent` to block indefinitely; `timingOverrides` injected into `runAutonomyExecuteCycle` (the steward executor), abort signal propagated into agent via `runParams.abortSignal`. Steward wraps the agent — agent does not own the timeout.
+- **Stream-phase evidence persisted and queryable:** success-path test queries `steward_events` for `runtime.stream_started`, `runtime.stream_first_event`, `runtime.stream_terminal` in order; all three present. Timeout-path test also verifies `runtime.stream_terminal` is persisted with `"outcome":"failed"` and the watchdog reason.
+- **Timeout breach terminalizes all three layers truthfully:** after watchdog — `hostTask.status=failed`, `hostTask.failed_at` truthy, `hostTask.completed_at=null`; `runtime.status=idle`, `runtime.last_error` contains `watchdog timeout`; `flowTask.link_status=failed`. No partial state.
+- **Host-task completion timestamps no longer stale:** success-path asserts `hostTask.completed_at >= idleEvent.ts` and `completedEvent.ts >= idleEvent.ts` — real terminalization time, not cycle-start. Failure path: `failed_at` truthy, `completed_at` null (no stale timestamp from success path).
+- **User-turn execution contract not narrowed:** `ws-a.integration.test.ts` user-turn tests (inbound → run → idle) pass with full event sequence (`runtime.started`, `proof.accepted`, `mission.task_value.adjudicated`, `runtime.idle`) and aborted-turn path (`link_status=failed`, `terminalTaskStatus:"failed"`) intact.
+
+#### WS-M advancement gate
+
+`WS-M` may advance only when:
+- all focused verification passes
+- reviewer confirms bounded autonomy recovery is real
+- reviewer confirms chronology truth is fixed
+- no blocker carry-forward remains against:
+  - bounded terminalization
+  - truthful timestamps
+  - autonomy-lane-only timeout ownership
+
+### Next process step
+
+- `STEWARD2 IMPLEMENT WS-M`
 
 ## Deployment gap — autonomy execution handoff vs OpenClaw in-turn autonomy (2026-05-04)
 

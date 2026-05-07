@@ -12,6 +12,26 @@ import {
   startStewardAutonomyBridge,
 } from "./autonomy-bridge.js";
 
+function createAutonomyModelResolverDeps() {
+  return {
+    resolveLmstudioRequestContext: vi.fn().mockResolvedValue({
+      apiKey: undefined,
+      headers: undefined,
+    }),
+    fetchLmstudioModels: vi.fn().mockResolvedValue({
+      reachable: true,
+      status: 200,
+      models: [
+        {
+          type: "llm",
+          key: "qwen/qwen3-14b",
+          loaded_instances: [{ id: "qwen/qwen3-14b" }],
+        },
+      ],
+    }),
+  };
+}
+
 async function removeTempDirWithRetry(dir: string): Promise<void> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
@@ -116,13 +136,28 @@ describe("WS-K autonomy bridge", () => {
           lmStudioLifecycleReady: true,
         }),
         runAgent: (vi.fn().mockResolvedValue({
-          payloads: [{ text: "Grounded autonomy execution completed." }],
+          payloads: [
+            {
+              text: [
+                "evidence_basis=runtime.started recorded history triggerSource autonomy",
+                "result=grounded autonomy execution evidence recorded",
+                "implication=the seeded autonomy task completed with traceable runtime evidence",
+                "remaining_uncertainty=needs broader live coverage",
+              ].join("\n"),
+            },
+          ],
           meta: {
             durationMs: 1,
             aborted: false,
-            finalAssistantVisibleText: "Grounded autonomy execution completed.",
+            finalAssistantVisibleText: [
+              "evidence_basis=runtime.started recorded history triggerSource autonomy",
+              "result=grounded autonomy execution evidence recorded",
+              "implication=the seeded autonomy task completed with traceable runtime evidence",
+              "remaining_uncertainty=needs broader live coverage",
+            ].join("\n"),
           },
         }) as never),
+        modelResolverDeps: createAutonomyModelResolverDeps(),
       });
 
       const hostTask = getDb()

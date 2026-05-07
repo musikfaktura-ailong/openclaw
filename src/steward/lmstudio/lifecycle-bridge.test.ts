@@ -63,6 +63,7 @@ describe("LM-C lifecycle bridge", () => {
 
     expect(result.bypassed).toBe(false);
     expect(result.plan.action).toBe("unload_then_load");
+    expect(result.queryModelId).toBe("deepseek-r1-distill-qwen-14b");
     expect(operations).toEqual(["unload:inst-primary", "load:deepseek-r1-distill-qwen-14b"]);
 
     const kinds = (
@@ -137,6 +138,43 @@ describe("LM-C lifecycle bridge", () => {
       .get() as { data_json: string };
     expect(mismatchRow.data_json).toContain("\"targetModelKey\":\"qwen/qwen3-14b\"");
     expect(mismatchRow.data_json).toContain("\"action\":\"unload_then_load\"");
+  });
+
+  it("returns the loaded instance id for inference queries after lifecycle planning", async () => {
+    initStewardDb(":memory:");
+    const getLoadedLmstudioModels = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          modelKey: "qwen/qwen3-14b",
+          instanceId: "inst-old",
+          contextLength: 4_096,
+          kind: "inference" as const,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          modelKey: "qwen/qwen3-14b",
+          instanceId: "inst-new",
+          contextLength: 32_768,
+          kind: "inference" as const,
+        },
+      ]);
+
+    const result = await ensureStewardLmstudioLifecycle({
+      selection: {
+        provider: "lmstudio",
+        modelId: "qwen/qwen3-14b",
+        role: "primary_local",
+        requestedContextLength: 32_768,
+      },
+      sessionKey: "agent:main:webchat:direct:user-1",
+      getLoadedLmstudioModels,
+      unloadLmstudioModel: vi.fn(async () => {}),
+      ensureLmstudioModelLoaded: vi.fn(async () => {}),
+    });
+
+    expect(result.queryModelId).toBe("inst-new");
   });
 
   it("records load failure and still releases the lifecycle lock", async () => {

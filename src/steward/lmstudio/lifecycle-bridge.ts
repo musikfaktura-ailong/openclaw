@@ -19,6 +19,7 @@ type StewardLmstudioLifecycleBridgeDeps = {
 export type StewardLmstudioLifecycleBridgeResult = {
   bypassed: boolean;
   plan: StewardLifecyclePlan;
+  queryModelId?: string;
 };
 
 const lifecycleLocks = new Map<string, AsyncLock>();
@@ -107,6 +108,23 @@ function isContextMismatch(plan: StewardLifecyclePlan): boolean {
   );
 }
 
+function resolveQueryModelIdFromLoadedModels(params: {
+  plan: StewardLifecyclePlan;
+  loadedModels: readonly LoadedLmstudioModelState[];
+}): string | undefined {
+  if (params.plan.targetKind !== "local_lmstudio_inference" || !params.plan.targetModelKey) {
+    return undefined;
+  }
+  const normalizedTarget = normalizeModelKey(params.plan.targetModelKey);
+  const matching = params.loadedModels.find((model) => {
+    if (model.kind === "embedding") {
+      return false;
+    }
+    return normalizeModelKey(model.modelKey) === normalizedTarget;
+  });
+  return matching?.instanceId?.trim() || undefined;
+}
+
 function buildLifecycleEventData(params: {
   selection: StewardRuntimeModelSelection;
   plan: StewardLifecyclePlan;
@@ -151,6 +169,7 @@ export async function ensureStewardLmstudioLifecycle(
     return {
       bypassed: true,
       plan: provisionalPlan,
+      queryModelId: undefined,
     };
   }
   const lockKey = normalizeLockKey(params.selection.baseUrl);
@@ -187,6 +206,10 @@ export async function ensureStewardLmstudioLifecycle(
       );
       plan = planLmstudioLifecycle({
         selection: params.selection,
+        loadedModels,
+      });
+      let queryModelId = resolveQueryModelIdFromLoadedModels({
+        plan,
         loadedModels,
       });
 
@@ -285,11 +308,21 @@ export async function ensureStewardLmstudioLifecycle(
           }),
           now: params.now,
         });
+        const reloadedModels = toBridgeLoadedModels(
+          await getLoadedLmstudioModels({
+            baseUrl: params.selection.baseUrl ?? undefined,
+          }),
+        );
+        queryModelId = resolveQueryModelIdFromLoadedModels({
+          plan,
+          loadedModels: reloadedModels,
+        });
       }
 
       return {
         bypassed: false,
         plan,
+        queryModelId: queryModelId ?? plan.targetModelKey ?? undefined,
       };
     } finally {
       appendLmstudioLifecycleEvent({

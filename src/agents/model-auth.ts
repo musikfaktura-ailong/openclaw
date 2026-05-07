@@ -32,6 +32,7 @@ import {
   CUSTOM_LOCAL_AUTH_MARKER,
   isKnownEnvApiKeyMarker,
   isNonSecretApiKeyMarker,
+  isOAuthApiKeyMarker,
   NON_ENV_SECRETREF_MARKER,
 } from "./model-auth-markers.js";
 import {
@@ -154,6 +155,13 @@ export function resolveUsableCustomProviderApiKey(params: {
     return null;
   }
   if (!isNonSecretApiKeyMarker(customKey)) {
+    return { apiKey: customKey, source: "models.json" };
+  }
+  if (
+    customKey !== NON_ENV_SECRETREF_MARKER &&
+    !isOAuthApiKeyMarker(customKey) &&
+    !isKnownEnvApiKeyMarker(customKey)
+  ) {
     return { apiKey: customKey, source: "models.json" };
   }
   if (!isKnownEnvApiKeyMarker(customKey)) {

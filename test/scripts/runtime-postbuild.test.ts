@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  copyStewardMigrationAssets,
   copyStaticExtensionAssets,
   listStaticExtensionAssetOutputs,
   writeStableRootRuntimeAliases,
@@ -32,6 +33,22 @@ describe("runtime postbuild static assets", () => {
     });
 
     expect(await fs.readFile(destPath, "utf8")).toBe("proxy-data\n");
+  });
+
+  it("copies steward migration sql files into dist root", async () => {
+    const rootDir = createTempDir("openclaw-runtime-postbuild-");
+    const migrationsDir = path.join(rootDir, "src/steward/db/migrations");
+    const migrationPath = path.join(migrationsDir, "0005_autonomy_execution.sql");
+    const ignoredPath = path.join(migrationsDir, "notes.txt");
+    const distPath = path.join(rootDir, "dist/0005_autonomy_execution.sql");
+    await fs.mkdir(migrationsDir, { recursive: true });
+    await fs.writeFile(migrationPath, "ALTER TABLE test ADD COLUMN value TEXT;\n", "utf8");
+    await fs.writeFile(ignoredPath, "ignore me\n", "utf8");
+
+    copyStewardMigrationAssets({ rootDir });
+
+    expect(await fs.readFile(distPath, "utf8")).toBe("ALTER TABLE test ADD COLUMN value TEXT;\n");
+    await expect(fs.stat(path.join(rootDir, "dist/notes.txt"))).rejects.toThrow();
   });
 
   it("warns when a declared static asset is missing", async () => {

@@ -9,6 +9,7 @@ import { recordAutonomyBootSequence, type BootRecord } from "./boot-sequence.js"
 import { runAutonomyTick, type AutonomyTickOutcome } from "./autonomy-runner.js";
 import {
   runAutonomyExecuteCycle,
+  type AutonomyModelResolverDeps,
   type AutonomyExecuteOutcome,
 } from "./autonomy-executor.js";
 import {
@@ -83,6 +84,7 @@ export async function runAutonomyBridgeCycle(params: {
   artifactRoot?: string;
   resolveStartupReadiness?: () => StartupReadinessSnapshot;
   runAgent?: Parameters<typeof runAutonomyExecuteCycle>[0]["runAgent"];
+  modelResolverDeps?: AutonomyModelResolverDeps;
 }): Promise<AutonomyBridgeCycleResult> {
   const now = params.now ?? Date.now();
   initStewardDb(params.storePath);
@@ -100,8 +102,8 @@ export async function runAutonomyBridgeCycle(params: {
         sessionKey: params.sessionKey,
         artifactRoot: params.artifactRoot,
         now,
-      })
-    : null;
+        })
+      : null;
   const execute =
     shouldRunTick &&
     params.cfg &&
@@ -112,6 +114,7 @@ export async function runAutonomyBridgeCycle(params: {
           storePath: params.storePath,
           now,
           runAgent: params.runAgent,
+          modelResolverDeps: params.modelResolverDeps,
         })
       : null;
   appendStewardEvent({
