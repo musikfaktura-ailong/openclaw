@@ -31,6 +31,7 @@ import { loadTriageArtifact } from "./triage-artifacts.js";
 type ClaimedAutonomyTask = {
   hostTaskId: number;
   sessionId: string;
+  seedFlowId: number;
   flowId: number;
   taskId: number;
   workClass: string;
@@ -524,6 +525,7 @@ function findPendingAutonomyTask(sessionId: string): ClaimedAutonomyTask | null 
       `SELECT
          ht.id,
          ht.session_id,
+         ht.seed_flow_id,
          ht.work_class,
          ht.title,
          ht.details,
@@ -532,11 +534,15 @@ function findPendingAutonomyTask(sessionId: string): ClaimedAutonomyTask | null 
          ft.flow_id,
          ft.task_id
        FROM steward_host_tasks ht
-       JOIN steward_flow_tasks ft ON ft.task_id = ht.id
-       JOIN steward_flows f ON f.id = ft.flow_id
+       JOIN steward_flow_tasks ft
+         ON ft.flow_id = ht.seed_flow_id
+        AND ft.task_id = ht.id
+       JOIN steward_flows f
+         ON f.id = ht.seed_flow_id
        WHERE ht.session_id = ?
          AND ht.source = 'autonomy'
          AND ht.status = 'pending'
+         AND ht.seed_flow_id IS NOT NULL
        ORDER BY ht.id ASC
        LIMIT 1`,
     )
@@ -544,6 +550,7 @@ function findPendingAutonomyTask(sessionId: string): ClaimedAutonomyTask | null 
     | {
         id: number;
         session_id: string;
+        seed_flow_id: number | null;
         work_class: string;
         title: string;
         details: string;
@@ -556,9 +563,13 @@ function findPendingAutonomyTask(sessionId: string): ClaimedAutonomyTask | null 
   if (!row) {
     return null;
   }
+  if (row.seed_flow_id == null || Number(row.seed_flow_id) !== Number(row.flow_id)) {
+    return null;
+  }
   return {
     hostTaskId: row.id,
     sessionId: row.session_id,
+    seedFlowId: Number(row.seed_flow_id),
     flowId: row.flow_id,
     taskId: row.task_id,
     workClass: row.work_class,

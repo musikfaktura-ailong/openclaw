@@ -95,6 +95,25 @@ function createAutonomyModelResolverDeps() {
   };
 }
 
+function getLatestAutonomyHostTaskRow() {
+  return getDb()
+    .prepare(
+      `SELECT id, seed_flow_id, status, claimed_at, completed_at, failed_at, error_json
+       FROM steward_host_tasks
+       ORDER BY id DESC
+       LIMIT 1`,
+    )
+    .get() as {
+    id: number;
+    seed_flow_id: number;
+    status: string;
+    claimed_at: number | null;
+    completed_at: number | null;
+    failed_at: number | null;
+    error_json: string;
+  };
+}
+
 describe("WS-L autonomy executor", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -283,6 +302,81 @@ describe("WS-L autonomy executor", () => {
     });
   });
 
+  it("binds execution to the seeded autonomy flow even when another flow-task row reuses the same task id", async () => {
+    await withTempStore(async ({ artifactRoot, storePath }) => {
+      const sessionKey = "agent:main:webchat:direct:ws-n-collision";
+      const authority = await seedOneTask({ sessionKey, artifactRoot });
+      const seededHostTask = getLatestAutonomyHostTaskRow();
+      const db = getDb();
+      const collisionFlowResult = db
+        .prepare(
+          `INSERT INTO steward_flows (
+             session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+           ) VALUES (?, 'control', 'running', '{}', ?, ?, ?, ?)`,
+        )
+        .run(authority.sessionId, process.pid, 1_250, 1_250, 1_250) as {
+        lastInsertRowid: number | bigint;
+      };
+      const collisionFlowId = Number(collisionFlowResult.lastInsertRowid);
+      db.prepare(
+        `INSERT INTO steward_flow_tasks (
+           flow_id, task_id, role, link_status, created_ts, updated_ts
+         ) VALUES (?, ?, 'primary', 'running', ?, ?)`,
+      ).run(collisionFlowId, seededHostTask.id, 1_250, 1_250);
+
+      const runAgent = vi.fn().mockResolvedValue({
+        payloads: [],
+        meta: {
+          durationMs: 1,
+          aborted: false,
+          finalAssistantVisibleText: "",
+        },
+      });
+
+      const result = await runAutonomyExecuteCycle({
+        cfg: {} as never,
+        sessionKey,
+        storePath,
+        now: 1_400,
+        runAgent: runAgent as never,
+        modelResolverDeps: createAutonomyModelResolverDeps(),
+      });
+
+      const hostTask = getLatestAutonomyHostTaskRow();
+      const seededFlow = db
+        .prepare(`SELECT status FROM steward_flows WHERE id = ?`)
+        .get(hostTask.seed_flow_id) as { status: string };
+      const seededFlowTask = db
+        .prepare(`SELECT link_status FROM steward_flow_tasks WHERE flow_id = ? AND task_id = ?`)
+        .get(hostTask.seed_flow_id, hostTask.id) as { link_status: string };
+      const collisionFlow = db
+        .prepare(`SELECT status FROM steward_flows WHERE id = ?`)
+        .get(collisionFlowId) as { status: string };
+      const collisionFlowTask = db
+        .prepare(`SELECT link_status FROM steward_flow_tasks WHERE flow_id = ? AND task_id = ?`)
+        .get(collisionFlowId, hostTask.id) as { link_status: string };
+      const latestRuntimeEvent = db
+        .prepare(
+          `SELECT flow_id, kind
+           FROM steward_events
+           WHERE kind = 'runtime.started'
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get() as { flow_id: number; kind: string };
+
+      expect(result).toMatchObject({
+        status: "claimed",
+        outcome: "failed",
+      });
+      expect(seededFlow.status).toBe("completed");
+      expect(seededFlowTask.link_status).toBe("failed");
+      expect(collisionFlow.status).toBe("running");
+      expect(collisionFlowTask.link_status).toBe("running");
+      expect(latestRuntimeEvent.flow_id).toBe(hostTask.seed_flow_id);
+    });
+  });
+
   it("blocks execute when runtime is already active", async () => {
     await withTempStore(async ({ artifactRoot, storePath }) => {
       const sessionKey = "agent:main:webchat:direct:ws-l-block";
@@ -350,26 +444,14 @@ describe("WS-L autonomy executor", () => {
         runAgent: runAgent as never,
         modelResolverDeps: createAutonomyModelResolverDeps(),
       });
-      const hostTaskId = result.status === "claimed" ? result.hostTaskId : null;
-
-      const hostTask = getDb()
-        .prepare(`SELECT status, claimed_at, completed_at, error_json FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
-        .get() as {
-        status: string;
-        claimed_at: number | null;
-        completed_at: number | null;
-        error_json: string;
-      };
+      const hostTask = getLatestAutonomyHostTaskRow();
       const flow = getDb()
         .prepare(
-          `SELECT f.status
-           FROM steward_flows f
-           JOIN steward_flow_tasks t ON t.flow_id = f.id
-           WHERE t.task_id = ?
-           ORDER BY f.id DESC
-           LIMIT 1`,
+          `SELECT status
+           FROM steward_flows
+           WHERE id = ?`,
         )
-        .get(hostTaskId) as { status: string };
+        .get(hostTask.seed_flow_id) as { status: string };
       const runtime = getDb()
         .prepare(`SELECT status, trigger_source FROM steward_runtime_state WHERE session_key = ?`)
         .get(authority.sessionId) as { status: string; trigger_source: string | null };
@@ -438,21 +520,14 @@ describe("WS-L autonomy executor", () => {
         runAgent: runAgent as never,
         modelResolverDeps: createAutonomyModelResolverDeps(),
       });
-      const hostTaskId = result.status === "claimed" ? result.hostTaskId : null;
-
-      const hostTask = getDb()
-        .prepare(`SELECT status, failed_at, error_json FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
-        .get() as { status: string; failed_at: number | null; error_json: string };
+      const hostTask = getLatestAutonomyHostTaskRow();
       const flow = getDb()
         .prepare(
-          `SELECT f.status
-           FROM steward_flows f
-           JOIN steward_flow_tasks t ON t.flow_id = f.id
-           WHERE t.task_id = ?
-           ORDER BY f.id DESC
-           LIMIT 1`,
+          `SELECT status
+           FROM steward_flows
+           WHERE id = ?`,
         )
-        .get(hostTaskId) as { status: string };
+        .get(hostTask.seed_flow_id) as { status: string };
       const failedEvent = getDb()
         .prepare(
           `SELECT data_json
@@ -497,13 +572,7 @@ describe("WS-L autonomy executor", () => {
         modelResolverDeps: createAutonomyModelResolverDeps(),
       });
 
-      const hostTask = getDb()
-        .prepare(`SELECT status, failed_at, completed_at FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
-        .get() as {
-        status: string;
-        failed_at: number | null;
-        completed_at: number | null;
-      };
+      const hostTask = getLatestAutonomyHostTaskRow();
       const failedEvent = getDb()
         .prepare(
           `SELECT data_json
@@ -563,20 +632,13 @@ describe("WS-L autonomy executor", () => {
         modelResolverDeps: createAutonomyModelResolverDeps(),
       });
 
-      const hostTask = getDb()
-        .prepare(`SELECT status, failed_at, completed_at, error_json FROM steward_host_tasks ORDER BY id DESC LIMIT 1`)
-        .get() as {
-        status: string;
-        failed_at: number | null;
-        completed_at: number | null;
-        error_json: string;
-      };
+      const hostTask = getLatestAutonomyHostTaskRow();
       const runtime = getDb()
         .prepare(`SELECT status, last_error FROM steward_runtime_state WHERE session_key = ?`)
         .get(authority.sessionId) as { status: string; last_error: string };
       const flowTask = getDb()
-        .prepare(`SELECT link_status FROM steward_flow_tasks ORDER BY id DESC LIMIT 1`)
-        .get() as { link_status: string };
+        .prepare(`SELECT link_status FROM steward_flow_tasks WHERE flow_id = ? AND task_id = ?`)
+        .get(hostTask.seed_flow_id, hostTask.id) as { link_status: string };
       const terminalEvent = getDb()
         .prepare(
           `SELECT data_json

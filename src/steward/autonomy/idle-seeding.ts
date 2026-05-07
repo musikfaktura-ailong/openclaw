@@ -1,5 +1,6 @@
 import { getDb } from "../db/db-bootstrap.js";
 import type { StewardFlowTaskRole, StewardFlowType } from "../db/runtime-schema.js";
+import { withImmediateTransaction } from "../db/tx.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
 import {
   createAutonomyHostTask,
@@ -87,42 +88,74 @@ export async function seedIdleAutonomyTask(params: {
     artifactRoot: params.artifactRoot,
     now,
   });
-  const hostTask = createAutonomyHostTask({
-    sessionId: params.sessionId,
-    workClass: params.workClass,
-    title: plan.title,
-    details: plan.details,
-    triageArtifactPath: triage.artifactPath,
-    triageKnowledgeId: triage.knowledgeId,
-    now,
+  const { flowId, hostTask } = withImmediateTransaction(getDb(), () => {
+    const db = getDb();
+    const provisionalStateJson = JSON.stringify({
+      seeded_by: "autonomy",
+      autonomy_work_class: params.workClass,
+      classification_reason: params.classificationReason,
+      title: plan.title,
+      details: plan.details,
+      host_task_id: null,
+      triage_artifact_path: triage.artifactPath,
+      triage_knowledge_id: triage.knowledgeId,
+      goal_phase: plan.phase,
+      goal_kind: plan.goalKind,
+    });
+    const flowResult = db
+      .prepare(
+        `INSERT INTO steward_flows (
+           session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, ?, 'resumable', ?, ?, ?, ?, ?)` ,
+      )
+      .run(
+        params.sessionId,
+        plan.flowType,
+        provisionalStateJson,
+        process.pid,
+        now,
+        now,
+        now,
+      ) as { lastInsertRowid: number | bigint };
+    const flowId = Number(flowResult.lastInsertRowid);
+    const hostTask = createAutonomyHostTask({
+      sessionId: params.sessionId,
+      seedFlowId: flowId,
+      workClass: params.workClass,
+      title: plan.title,
+      details: plan.details,
+      triageArtifactPath: triage.artifactPath,
+      triageKnowledgeId: triage.knowledgeId,
+      now,
+    });
+    const stateJson = JSON.stringify({
+      seeded_by: "autonomy",
+      autonomy_work_class: params.workClass,
+      classification_reason: params.classificationReason,
+      title: plan.title,
+      details: plan.details,
+      host_task_id: hostTask.taskId,
+      triage_artifact_path: triage.artifactPath,
+      triage_knowledge_id: triage.knowledgeId,
+      goal_phase: plan.phase,
+      goal_kind: plan.goalKind,
+    });
+    db.prepare(
+      `UPDATE steward_flows
+       SET state_json = ?, updated_ts = ?, heartbeat_ts = ?
+       WHERE id = ?`,
+    ).run(stateJson, now, now, flowId);
+    db.prepare(
+      `INSERT INTO steward_flow_tasks (
+         flow_id, task_id, role, link_status, created_ts, updated_ts
+       ) VALUES (?, ?, ?, 'pending', ?, ?)` ,
+    ).run(flowId, hostTask.taskId, plan.role, now, now);
+    return {
+      flowId,
+      hostTask,
+    };
   });
-  const stateJson = JSON.stringify({
-    seeded_by: "autonomy",
-    autonomy_work_class: params.workClass,
-    classification_reason: params.classificationReason,
-    title: plan.title,
-    details: plan.details,
-    host_task_id: hostTask.taskId,
-    triage_artifact_path: triage.artifactPath,
-    triage_knowledge_id: triage.knowledgeId,
-    goal_phase: plan.phase,
-    goal_kind: plan.goalKind,
-  });
-  const db = getDb();
-  const flowResult = db
-    .prepare(
-      `INSERT INTO steward_flows (
-         session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
-       ) VALUES (?, ?, 'resumable', ?, ?, ?, ?, ?)` ,
-    )
-    .run(params.sessionId, plan.flowType, stateJson, process.pid, now, now, now) as { lastInsertRowid: number | bigint };
-  const flowId = Number(flowResult.lastInsertRowid);
   const taskId = hostTask.taskId;
-  db.prepare(
-    `INSERT INTO steward_flow_tasks (
-       flow_id, task_id, role, link_status, created_ts, updated_ts
-     ) VALUES (?, ?, ?, 'pending', ?, ?)` ,
-  ).run(flowId, taskId, plan.role, now, now);
 
   appendStewardEvent({
     kind: "autonomy.task.seeded",

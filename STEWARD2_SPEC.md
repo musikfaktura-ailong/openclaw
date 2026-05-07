@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-M` merged via PR #28 (2026-05-07). Autonomy execution reliability and chronology truth are now on `main`: autonomy timeout ownership is explicit and lane-scoped, watchdog recovery is host-owned, stream-phase evidence is persisted, timeout breach terminalizes runtime/flow-task/host-task truthfully, and completion timestamps are no longer stale. Next step: resume live deployment testing.**
+Current phase: **`WS-N` implemented locally (2026-05-07). Autonomy host-task execution is now bound to an explicit seeded-flow identity pair instead of inferred `task_id` ownership: `seed_flow_id` is persisted on `steward_host_tasks`, seed creation is atomic, claim/execution bind only to `(host_task_id, seed_flow_id)`, and the collision regression now proves runtime flow/task numeric reuse cannot steal autonomy flow ownership. Next step: reviewer gate for `WS-N`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,7 +56,7 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing is unblocked again: `WS-M` is merged and the next live pass should verify the running steward against the corrected bounded autonomy contract
+- deployment testing reached the next real live integration boundary after `WS-M`: bounded execution now works, but autonomy flow identity is still not steward-owned tightly enough
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -6497,6 +6497,205 @@ Before patching, the spec must open a new execution-reliability slice that defin
   - or a shared active-run supervisor
 
 Until that exists, the steward is still not deployment-ready for autonomous live thinking, even though the LM Studio model/load selection bug is fixed.
+
+## Live deployment follow-up — autonomy flow identity collision after `WS-M` (2026-05-07)
+
+Why this section exists:
+- `WS-M` fixed the old hang class
+- merged `main` now proves that autonomy execution really starts, uses the intended LM Studio entry path, and returns to `runtime.idle`
+- but live testing exposed a new structural bug in autonomy flow identity ownership
+
+### Live evidence
+
+The latest live maintenance execution showed:
+
+- `autonomy.task.seeded`
+  - `flow_id = 1292`
+  - `taskId = 1290`
+- then the same execution chain recorded:
+  - `autonomy.execution.requested` on `flow_id = 1290`
+  - `runtime.started` on `flow_id = 1290`
+  - `runtime.idle` on `flow_id = 1290`
+  - `autonomy.execution.failed` on `flow_id = 1290`
+- while the actual seeded autonomy flow stayed non-terminal:
+  - `steward_flows.id = 1292` -> `status = resumable`
+  - `steward_flow_tasks(flow_id = 1292, task_id = 1290)` -> `link_status = pending`
+
+At the same time, host-task truth was terminal:
+- `steward_host_tasks.id = 1290` -> `status = failed`
+
+Operational result:
+- every later autonomy tick sees flow `1292` as still live
+- duplicate suppression keeps firing on `duplicateFlowId = 1292`
+- autonomy scheduling is poisoned even though the host task itself already failed truthfully
+
+### Exact bug
+
+This is not another timeout bug and not another LM Studio bug.
+
+It is an identity bug:
+
+- `steward_flow_tasks.task_id` is not globally unique
+- runtime-created flow-task rows can share the same numeric `task_id` as an autonomy `host_task_id`
+- `findPendingAutonomyTask()` currently joins by:
+  - `JOIN steward_flow_tasks ft ON ft.task_id = ht.id`
+
+That is ambiguous by construction once runtime flows exist.
+
+For the live failure:
+- autonomy seed pair:
+  - `(flow_id = 1292, task_id = 1290)`
+- runtime flow row:
+  - `(flow_id = 1290, task_id = 1290)`
+
+So the executor can bind the host task to the wrong flow row.
+
+### Invariant
+
+Autonomy execution must bind to the exact steward-owned seeded identity:
+
+- `host_task_id`
+- `seeded_autonomy_flow_id`
+
+Never by `task_id` alone.
+
+More concretely:
+- one autonomy host task must have exactly one owning seeded autonomy flow
+- claim must recover that exact owning flow
+- execution events must stay on that exact flow
+- terminalization must update that exact flow and that exact flow-task row
+- duplicate suppression may only treat that exact owning flow as live or terminal
+
+### Why a local join patch is not enough
+
+The problem is not “one bad query”.
+
+The schema and executor currently allow autonomy flow identity to be inferred indirectly from `task_id`.
+That means any future code path that assumes `task_id` is globally unique can recreate the same class.
+
+So the correct fix is to move from inferred identity to explicit identity ownership.
+
+### Correct structural solution
+
+Introduce explicit seeded-flow ownership on the host-task side.
+
+Required model change:
+- add a first-class `seed_flow_id` (or equivalently named field) to `steward_host_tasks`
+  - foreign key to `steward_flows(id)`
+  - written at seed time
+  - immutable after creation
+
+Required behavior change:
+
+1. Seed phase
+   - host task and autonomy flow must become one explicit bound pair
+   - the host task must persist its owning `seed_flow_id`
+
+2. Claim phase
+   - load the host task first
+   - bind only to:
+     - `steward_flows.id = host_task.seed_flow_id`
+     - `steward_flow_tasks.flow_id = host_task.seed_flow_id`
+     - `steward_flow_tasks.task_id = host_task.id`
+   - reject any inconsistent row instead of silently falling through
+
+3. Execute phase
+   - `recordStewardTurnStart()` and all autonomy execution events must continue to use the owning seeded autonomy flow id
+   - runtime-created rows must never become the autonomy source-of-truth flow by numeric collision
+
+4. Terminal phase
+   - `recordTurnComplete()` / `completeRuntimeFlow()` must close the exact seeded autonomy flow row
+   - host-task terminalization and flow terminalization must stay bound to the same identity pair
+
+5. Duplicate suppression
+   - remains keyed on live autonomy flows
+   - but now that live autonomy flow identity is explicit, suppression will stop once the owning flow truly terminalizes
+
+### What happens when this is fixed
+
+After the fix:
+- autonomy seed creates one explicit identity pair:
+  - `host_task_id`
+  - `seed_flow_id`
+- claim recovers that exact pair
+- execution events stay on the seeded autonomy flow, not a numerically-colliding runtime flow
+- on completion/failure:
+  - host task terminalizes
+  - seeded autonomy flow terminalizes
+  - seeded flow-task row terminalizes
+- duplicate suppression no longer sees a stranded false-live flow
+- future autonomy ticks can seed fresh maintenance or goal work normally
+
+### Consequences if left unfixed
+
+If this remains:
+- autonomy can do real work while still poisoning later scheduling
+- duplicate suppression becomes analytically false
+- the steward ledger no longer tells a coherent flow story for autonomy runs
+- any later logic trusting flow status can make wrong decisions
+- this can recur for any autonomy work class, not only `maintenance_work`
+
+### Required implementation slice
+
+#### WS-N — autonomy seeded-flow identity ownership
+
+Implementer: Codex  
+Reviewer: Claude
+
+Invariant:
+- autonomy execution must bind `host_task_id` to its exact seeded autonomy `flow_id`, never by `task_id` alone
+
+Scope:
+- add explicit `seed_flow_id` ownership to `steward_host_tasks`
+- update autonomy seed/claim/execution to use that explicit identity
+- add a migration for live DBs
+- add a collision regression test proving runtime flow/task id collision cannot steal autonomy flow ownership
+- document and verify post-fix cleanup of the stranded duplicate-suppression residue
+
+Target files:
+- `src/steward/db/migrations/*`
+- `src/steward/autonomy/goal-orchestrator.ts`
+- `src/steward/autonomy/idle-seeding.ts`
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+- `src/steward/runtime/session-bridge.ts`
+- `STEWARD2_SPEC.md`
+
+Required verification:
+- focused autonomy executor tests
+- new collision test proving:
+  - seeded `flow_id != host_task_id`
+  - runtime flow id can numerically collide with `host_task_id`
+  - autonomy still terminalizes the seeded autonomy flow, not the runtime flow
+- TypeScript clean
+
+Reviewer gate:
+- PASS only if explicit seeded-flow ownership exists in schema and code, and the collision regression test proves the live failure class cannot recur
+
+Advancement gate:
+- advance only after:
+  - schema ownership is explicit
+  - claim identity is explicit
+  - collision regression passes
+  - live duplicate-suppression poisoning is no longer structurally possible for this class
+
+Implementation record:
+- added migration `src/steward/db/migrations/0006_autonomy_seed_flow_identity.sql`
+- `steward_host_tasks` now owns explicit `seed_flow_id`
+- autonomy seeding now creates the seed-flow / host-task / flow-task identity pair inside one immediate transaction
+- claim path now binds only to the persisted `(host_task_id, seed_flow_id)` pair
+- inconsistent seeded-flow rows are rejected instead of silently rebinding by `task_id`
+- focused tests now assert against the exact seeded autonomy flow instead of ambiguous `task_id`-only lookup
+- new collision regression proves a runtime flow/task row with the same numeric `task_id` cannot steal autonomy execution ownership
+
+Local verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/goal-orchestrator.test.ts src/steward/autonomy/autonomy-executor.test.ts`
+  - PASS: `2` files, `16` tests
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+
+Current carry-forwards:
+- none
 
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
