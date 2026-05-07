@@ -349,6 +349,32 @@ describe("openai transport stream", () => {
     });
   });
 
+  it("uses transportModelId override for OpenAI-compatible completions payloads", () => {
+    const params = buildOpenAICompletionsParams(
+      {
+        id: "qwen/qwen3-14b",
+        transportModelId: "inst-qwen-loaded",
+        name: "Qwen3 14B",
+        api: "openai-completions",
+        provider: "lmstudio",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 32_768,
+        maxTokens: 8_192,
+      } as never,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [],
+      } as never,
+      undefined,
+    ) as { model?: string };
+
+    expect(params.model).toBe("inst-qwen-loaded");
+  });
+
   it("keeps OpenRouter thinking format for declared OpenRouter providers on custom proxy URLs", async () => {
     const streamFn = buildTransportAwareSimpleStreamFn(
       attachModelProviderRequestTransport(

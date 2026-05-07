@@ -454,7 +454,8 @@ describe("wrapStreamFnWithStewardLmstudioLifecycle", () => {
   it("triggers steward LM Studio lifecycle before local inference", async () => {
     initStewardDb(":memory:");
     const operations: string[] = [];
-    const baseStreamFn = vi.fn(async () => {
+    const baseStreamFn = vi.fn(async (model: { id?: string; transportModelId?: string }) => {
+      operations.push(`stream:${model.id}:${model.transportModelId ?? "none"}`);
       operations.push("stream");
       return createFakeStream({
         events: [],
@@ -467,16 +468,18 @@ describe("wrapStreamFnWithStewardLmstudioLifecycle", () => {
       contextTokenBudget: 32_768,
       ensureLifecycle: async ({ selection, sessionKey }) => {
         operations.push(`lifecycle:${selection.provider}:${selection.modelId}:${selection.requestedContextLength}`);
-        return await import("../../../steward/lmstudio/lifecycle-bridge.js").then((module) =>
-          module.ensureStewardLmstudioLifecycle({
-            selection,
-            sessionKey,
-            getLoadedLmstudioModels: vi.fn(async () => []),
-            ensureLmstudioModelLoaded: vi.fn(async () => {
-              operations.push("load");
-            }),
-          }),
-        );
+        return {
+          bypassed: false,
+          plan: {
+            targetKind: "local_lmstudio_inference",
+            action: "load_only",
+            targetModelKey: "qwen/qwen3-14b",
+            requiredContextLength: 16_384,
+            modelsToUnload: [],
+            reason: "test",
+          },
+          queryModelId: "inst-qwen",
+        };
       },
     });
 
@@ -492,24 +495,9 @@ describe("wrapStreamFnWithStewardLmstudioLifecycle", () => {
     );
 
     expect(operations).toEqual([
-      "lifecycle:lmstudio:qwen/qwen3-14b:32768",
-      "load",
+      "lifecycle:lmstudio:qwen/qwen3-14b:16384",
+      "stream:qwen/qwen3-14b:inst-qwen",
       "stream",
-    ]);
-    const kinds = (
-      getDb()
-        .prepare(`SELECT kind FROM steward_events WHERE kind LIKE 'lmstudio.lifecycle.%' ORDER BY id ASC`)
-        .all() as Array<{ kind: string }>
-    ).map((row) => row.kind);
-    expect(kinds).toEqual([
-      "lmstudio.lifecycle.lock_wait_started",
-      "lmstudio.lifecycle.lock_acquired",
-      "lmstudio.lifecycle.load_started",
-      "lmstudio.lifecycle.load_finished",
-      "lmstudio.lifecycle.lock_released",
-      "lmstudio.lifecycle.query_lock_wait_started",
-      "lmstudio.lifecycle.query_lock_acquired",
-      "lmstudio.lifecycle.query_lock_released",
     ]);
   });
 
@@ -612,6 +600,49 @@ describe("wrapStreamFnWithStewardLmstudioLifecycle", () => {
       .prepare(`SELECT COUNT(*) AS count FROM steward_events WHERE kind LIKE 'lmstudio.lifecycle.query_lock_%'`)
       .get() as { count: number };
     expect(queryLockCount.count).toBe(6);
+  });
+
+  it("uses steward-owned default load context instead of provider model metadata", async () => {
+    initStewardDb(":memory:");
+    const seenRequestedContexts: Array<number | null | undefined> = [];
+    const wrapped = wrapStreamFnWithStewardLmstudioLifecycle({
+      streamFn: (async () =>
+        createFakeStream({
+          events: [],
+          resultMessage: { role: "assistant", content: "ok" },
+        })) as never,
+      sessionKey: "agent:main:webchat:direct:user-1",
+      contextTokenBudget: 64_000,
+      ensureLifecycle: async ({ selection }) => {
+        seenRequestedContexts.push(selection.requestedContextLength);
+        return {
+          bypassed: false,
+          plan: {
+            targetKind: "local_lmstudio_inference",
+            action: "load_only",
+            targetModelKey: "qwen/qwen3-14b",
+            requiredContextLength: 16_384,
+            modelsToUnload: [],
+            reason: "test",
+          },
+          queryModelId: "inst-qwen",
+        };
+      },
+    });
+
+    await wrapped(
+      {
+        provider: "lmstudio",
+        id: "mistralai_ministral-3-14b-reasoning-2512@q6_k",
+        baseUrl: "http://127.0.0.1:1234",
+        contextTokens: 64_000,
+        contextWindow: 262_144,
+      } as never,
+      { messages: [] } as never,
+      {},
+    );
+
+    expect(seenRequestedContexts).toEqual([16_384]);
   });
 });
 

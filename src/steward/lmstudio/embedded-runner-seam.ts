@@ -6,21 +6,22 @@ import {
   type StewardLmstudioLifecycleBridgeResult,
 } from "./lifecycle-bridge.js";
 
+export const STEWARD_DEFAULT_LOCAL_INFERENCE_LOAD_CONTEXT_LENGTH = 16_384;
+
 function resolveRequestedContextLengthForLifecycle(params: {
   model: ProviderRuntimeModel;
   fallbackContextTokenBudget?: number;
 }): number | undefined {
-  const candidates = [
-    params.model.contextTokens,
-    params.model.contextWindow,
-    params.fallbackContextTokenBudget,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
-      return Math.floor(candidate);
-    }
+  const fallback =
+    typeof params.fallbackContextTokenBudget === "number" &&
+    Number.isFinite(params.fallbackContextTokenBudget) &&
+    params.fallbackContextTokenBudget > 0
+      ? Math.floor(params.fallbackContextTokenBudget)
+      : undefined;
+  if (fallback !== undefined && fallback < STEWARD_DEFAULT_LOCAL_INFERENCE_LOAD_CONTEXT_LENGTH) {
+    return fallback;
   }
-  return undefined;
+  return STEWARD_DEFAULT_LOCAL_INFERENCE_LOAD_CONTEXT_LENGTH;
 }
 
 export function wrapStreamFnWithStewardLmstudioLifecycle(params: {
@@ -67,14 +68,21 @@ export function wrapStreamFnWithStewardLmstudioLifecycle(params: {
         fallbackContextTokenBudget: params.contextTokenBudget,
       }),
     };
-    await ensureLifecycle({
+    const lifecycle = await ensureLifecycle({
       selection,
       sessionKey: params.sessionKey,
     });
+    const streamModel =
+      lifecycle.queryModelId && lifecycle.queryModelId !== runtimeModel.id
+        ? ({
+            ...runtimeModel,
+            transportModelId: lifecycle.queryModelId,
+          } satisfies ProviderRuntimeModel)
+        : runtimeModel;
     return await queryLock({
       selection,
       sessionKey: params.sessionKey,
-      task: async () => await Promise.resolve(params.streamFn(model, context, options)),
+      task: async () => await Promise.resolve(params.streamFn(streamModel, context, options)),
     });
   };
 }

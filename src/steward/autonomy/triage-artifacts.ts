@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getStewardDbPath } from "../db/db-bootstrap.js";
 import { resolveStewardDbPath } from "../db/runtime-db.js";
 import { storeKnowledge } from "../memory/knowledge-store.js";
 import type { StewardEmbedder } from "../memory/embedder.js";
@@ -26,10 +27,32 @@ function utcDay(now: number): string {
 }
 
 function defaultArtifactRoot(): string {
-  const dbPath = resolveStewardDbPath(process.env.OPENCLAW_STEWARD_DB_PATH ?? "steward.db");
+  let dbPath: string;
+  try {
+    dbPath = getStewardDbPath();
+  } catch {
+    dbPath = resolveStewardDbPath(process.env.OPENCLAW_STEWARD_DB_PATH ?? "steward.db");
+  }
   return dbPath === ":memory:"
     ? path.join(process.cwd(), "artifacts", "steward")
     : path.join(path.dirname(dbPath), "artifacts", "steward");
+}
+
+function resolveStewardDbDir(): string {
+  let dbPath: string;
+  try {
+    dbPath = getStewardDbPath();
+  } catch {
+    dbPath = resolveStewardDbPath(process.env.OPENCLAW_STEWARD_DB_PATH ?? "steward.db");
+  }
+  return dbPath === ":memory:" ? process.cwd() : path.dirname(dbPath);
+}
+
+function resolveTriageArtifactPath(artifactPath: string): string {
+  if (path.isAbsolute(artifactPath)) {
+    return artifactPath;
+  }
+  return path.resolve(resolveStewardDbDir(), artifactPath);
 }
 
 export async function persistAutonomyTriageArtifact(params: {
@@ -90,6 +113,6 @@ export async function persistAutonomyTriageArtifact(params: {
 }
 
 export async function loadTriageArtifact(artifactPath: string): Promise<PersistedAutonomyTriageArtifact> {
-  const raw = await fs.readFile(artifactPath, "utf8");
+  const raw = await fs.readFile(resolveTriageArtifactPath(artifactPath), "utf8");
   return JSON.parse(raw) as PersistedAutonomyTriageArtifact;
 }

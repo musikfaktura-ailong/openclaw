@@ -86,6 +86,12 @@ type OpenAIModeModel = Model<Api> & {
   compat?: Record<string, unknown>;
 };
 
+function resolveTransportModelId(model: Model<Api>): string {
+  const runtimeModel = model as ProviderRuntimeModel;
+  const override = runtimeModel.transportModelId?.trim();
+  return override && override.length > 0 ? override : model.id;
+}
+
 type MutableAssistantOutput = {
   role: "assistant";
   content: Array<Record<string, unknown>>;
@@ -1497,7 +1503,7 @@ export function buildOpenAICompletionsParams(
     : context;
   const messages = convertMessages(model as never, completionsContext, compat as never);
   const params: Record<string, unknown> = {
-    model: model.id,
+    model: resolveTransportModelId(model),
     messages: compat.requiresStringContent
       ? flattenCompletionMessagesToStringContent(messages)
       : messages,

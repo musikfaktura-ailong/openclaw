@@ -33,6 +33,9 @@ export const STATIC_EXTENSION_ASSETS = [
   },
 ];
 
+const STEWARD_MIGRATIONS_SRC_DIR = "src/steward/db/migrations";
+const STEWARD_MIGRATIONS_DIST_DIR = "dist";
+
 export function listStaticExtensionAssetOutputs(params = {}) {
   const assets = params.assets ?? STATIC_EXTENSION_ASSETS;
   return assets
@@ -54,6 +57,32 @@ export function copyStaticExtensionAssets(params = {}) {
     } else {
       warn(`[runtime-postbuild] static asset not found, skipping: ${src}`);
     }
+  }
+}
+
+export function copyStewardMigrationAssets(params = {}) {
+  const rootDir = params.rootDir ?? ROOT;
+  const fsImpl = params.fs ?? fs;
+  const warn = params.warn ?? console.warn;
+  const srcDir = path.join(rootDir, STEWARD_MIGRATIONS_SRC_DIR);
+  const destDir = path.join(rootDir, STEWARD_MIGRATIONS_DIST_DIR);
+
+  let entries = [];
+  try {
+    entries = fsImpl.readdirSync(srcDir, { withFileTypes: true });
+  } catch {
+    warn(`[runtime-postbuild] steward migrations dir not found, skipping: ${STEWARD_MIGRATIONS_SRC_DIR}`);
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^\d+_.*\.sql$/i.test(entry.name)) {
+      continue;
+    }
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    fsImpl.mkdirSync(path.dirname(destPath), { recursive: true });
+    fsImpl.copyFileSync(srcPath, destPath);
   }
 }
 
@@ -88,6 +117,7 @@ export function runRuntimePostBuild(params = {}) {
   stageBundledPluginRuntimeDeps(params);
   stageBundledPluginRuntime(params);
   writeStableRootRuntimeAliases(params);
+  copyStewardMigrationAssets(params);
   copyStaticExtensionAssets(params);
 }
 
