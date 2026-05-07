@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-M` reviewer gate PASSED (2026-05-07). All six conditions confirmed: autonomy timeout ownership explicit and lane-scoped, watchdog at correct steward seam, stream-phase evidence persisted, timeout breach terminalizes all three layers, completion timestamps no longer stale, user-turn contract intact. Ready to advance past WS-M advancement gate.**
+Current phase: **`WS-M` merged via PR #28 (2026-05-07). Autonomy execution reliability and chronology truth are now on `main`: autonomy timeout ownership is explicit and lane-scoped, watchdog recovery is host-owned, stream-phase evidence is persisted, timeout breach terminalizes runtime/flow-task/host-task truthfully, and completion timestamps are no longer stale. Next step: resume live deployment testing.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,7 +56,7 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing unblocked: `WS-M` reviewer gate passed; next live pass may proceed once advancement gate conditions are confirmed met
+- deployment testing is unblocked again: `WS-M` is merged and the next live pass should verify the running steward against the corrected bounded autonomy contract
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -6787,9 +6787,23 @@ Reviewer reports:
   - truthful timestamps
   - autonomy-lane-only timeout ownership
 
+#### WS-M advancement result (2026-05-07)
+
+`WS-M` advanced and merged via PR `#28`.
+
+Merge commit:
+- `779ba71ab522e513ac79fac947f5b6bb2ef220a0`
+
+Result:
+- bounded autonomy timeout ownership is now on `main`
+- watchdog-based host recovery is now on `main`
+- stream-phase runtime evidence is now on `main`
+- truthful autonomy completion chronology is now on `main`
+- no reviewer carry-forward remains for `WS-M`
+
 ### Next process step
 
-- `STEWARD2 IMPLEMENT WS-M`
+- resume live deployment testing against merged `main`
 
 ## Deployment gap — autonomy execution handoff vs OpenClaw in-turn autonomy (2026-05-04)
 
