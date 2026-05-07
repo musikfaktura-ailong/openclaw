@@ -14,6 +14,7 @@ export type AutonomySeedPlan = {
 
 export type StewardHostTaskRecord = {
   taskId: number;
+  seedFlowId: number;
   title: string;
   details: string;
   workClass: AutonomyWorkClass;
@@ -139,6 +140,7 @@ export function resolveAutonomySeedPlan(params: {
 
 export function createAutonomyHostTask(params: {
   sessionId: string;
+  seedFlowId: number;
   workClass: AutonomyWorkClass;
   title: string;
   details: string;
@@ -150,12 +152,13 @@ export function createAutonomyHostTask(params: {
   const result = getDb()
     .prepare(
       `INSERT INTO steward_host_tasks (
-         session_id, source, status, work_class, title, details, triage_artifact_path, triage_knowledge_id,
+         session_id, source, status, seed_flow_id, work_class, title, details, triage_artifact_path, triage_knowledge_id,
          created_ts, updated_ts
-       ) VALUES (?, 'autonomy', 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, 'autonomy', 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       params.sessionId,
+      params.seedFlowId,
       params.workClass,
       params.title,
       params.details,
@@ -166,6 +169,7 @@ export function createAutonomyHostTask(params: {
     ) as { lastInsertRowid: number | bigint };
   return {
     taskId: Number(result.lastInsertRowid),
+    seedFlowId: params.seedFlowId,
     title: params.title,
     details: params.details,
     workClass: params.workClass,

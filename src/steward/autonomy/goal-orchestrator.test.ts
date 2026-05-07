@@ -31,21 +31,33 @@ describe("WS-K goal orchestrator", () => {
 
   it("creates a real host-owned autonomy task reference", () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:ws-k-goal-b", 1_000);
+    const flowResult = getDb()
+      .prepare(
+        `INSERT INTO steward_flows (
+           session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, 'research', 'resumable', '{}', ?, ?, ?, ?)` ,
+      )
+      .run(authority.sessionId, process.pid, 1_500, 1_500, 1_500) as {
+      lastInsertRowid: number | bigint;
+    };
+    const seedFlowId = Number(flowResult.lastInsertRowid);
 
     const task = createAutonomyHostTask({
       sessionId: authority.sessionId,
+      seedFlowId,
       workClass: "goal_work",
       title: "Research pick: steward-vetted opportunity",
       details: "bounded proof-first task",
       now: 2_000,
     });
     const row = getDb()
-      .prepare(`SELECT work_class, title, source FROM steward_host_tasks WHERE id = ?`)
-      .get(task.taskId) as { work_class: string; title: string; source: string };
+      .prepare(`SELECT work_class, title, source, seed_flow_id FROM steward_host_tasks WHERE id = ?`)
+      .get(task.taskId) as { work_class: string; title: string; source: string; seed_flow_id: number };
 
     expect(row.work_class).toBe("goal_work");
     expect(row.title).toContain("Research");
     expect(row.source).toBe("autonomy");
+    expect(row.seed_flow_id).toBe(seedFlowId);
   });
 
   it("routes rejected latest proof into repair_rejected_proof planning", () => {
