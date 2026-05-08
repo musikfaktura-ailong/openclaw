@@ -56,7 +56,7 @@ describe("WS-A steward runtime authority", () => {
         .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'steward_%'`)
         .all() as Array<{ name: string }>;
 
-      expect(version.user_version).toBe(5);
+      expect(version.user_version).toBe(6);
       expect(tables.map((row) => row.name).sort()).toEqual(
         expect.arrayContaining([
           "steward_blockers",

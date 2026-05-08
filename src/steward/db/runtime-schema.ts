@@ -39,6 +39,7 @@ export type StewardEventKind =
   | "autonomy.execution.requested"
   | "autonomy.execution.completed"
   | "autonomy.execution.failed"
+  | "autonomy.progress.policy"
   | "job.daily_self_review.recorded"
   | "job.daily_self_review.reused"
   | "job.daily_self_review.memory_extracted"
