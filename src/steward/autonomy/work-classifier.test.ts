@@ -16,9 +16,17 @@ describe("WS-IC work classifier", () => {
   it("classifies goal work when the session has no proof yet", () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-goal", 1_000);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
       workClass: "goal_work",
       reason: "no_recorded_proof_yet",
+    });
+    const gap = getDb()
+      .prepare(`SELECT gap_kind, work_class, status FROM steward_goal_gaps WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
+      .get(authority.sessionId) as { gap_kind: string; work_class: string; status: string };
+    expect(gap).toMatchObject({
+      gap_kind: "no_recorded_proof_yet",
+      work_class: "goal_work",
+      status: "open",
     });
   });
 
@@ -37,7 +45,7 @@ describe("WS-IC work classifier", () => {
        ) VALUES (?, ?, 'operator_required', 'active', 0, '{}', ?, ?)` ,
     ).run(flowId, flowId, 1_100, 1_100);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
       workClass: "diagnostic_work",
       reason: "active_blockers_present",
     });
@@ -57,7 +65,7 @@ describe("WS-IC work classifier", () => {
        VALUES (?, ?, NULL, 'runtime.idle', 'idle', '{}')` ,
     ).run(1_200, authority.sessionId);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
       workClass: "review_or_consolidation",
       reason: "audit_missing",
     });
@@ -90,7 +98,7 @@ describe("WS-IC work classifier", () => {
       ).run(flowId, flowId, 1_100 + index, 1_100 + index);
     }
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
       workClass: "diagnostic_work",
       reason: "consecutive_primary_failures",
     });
@@ -110,7 +118,7 @@ describe("WS-IC work classifier", () => {
        VALUES (?, ?, NULL, 'mission.audit.report', 'audit', '{}')` ,
     ).run(1_060, authority.sessionId);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toEqual({
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
       workClass: "maintenance_work",
       reason: "baseline_maintenance_window",
     });

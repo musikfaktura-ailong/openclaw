@@ -75,6 +75,12 @@ describe("WS-IC autonomy runner", () => {
       const seededEvent = getDb()
         .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.task.seeded' ORDER BY id DESC LIMIT 1`)
         .get() as { data_json: string };
+      const gapEvent = getDb()
+        .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.gap.recorded' ORDER BY id DESC LIMIT 1`)
+        .get() as { data_json: string };
+      const gapRow = getDb()
+        .prepare(`SELECT gap_kind, work_class, status FROM steward_goal_gaps WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
+        .get(authority.sessionId) as { gap_kind: string; work_class: string; status: string };
 
       expect(result).toMatchObject({
         status: "seeded",
@@ -89,6 +95,12 @@ describe("WS-IC autonomy runner", () => {
       expect(hostTask.title).toContain("Research");
       expect(seededEvent.data_json).toContain("\"workClass\":\"goal_work\"");
       expect(seededEvent.data_json).toContain("\"triageArtifactPath\"");
+      expect(gapEvent.data_json).toContain("\"gapKind\":\"no_recorded_proof_yet\"");
+      expect(gapRow).toMatchObject({
+        gap_kind: "no_recorded_proof_yet",
+        work_class: "goal_work",
+        status: "open",
+      });
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -225,6 +237,9 @@ describe("WS-IC autonomy runner", () => {
       const boundaryEvent = getDb()
         .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.progress.policy' ORDER BY id DESC LIMIT 1`)
         .get() as { data_json: string };
+      const gapEvent = getDb()
+        .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.gap.recorded' ORDER BY id DESC LIMIT 1`)
+        .get() as { data_json: string };
 
       expect(result).toMatchObject({
         status: "seeded",
@@ -233,6 +248,7 @@ describe("WS-IC autonomy runner", () => {
       });
       expect(boundaryEvent.data_json).toContain("\"scope\":\"work_class_boundary\"");
       expect(boundaryEvent.data_json).toContain("\"reason\":\"repeated_bad_outcomes_for_maintenance_work\"");
+      expect(gapEvent.data_json).toContain("\"gapKind\":\"repeated_bad_outcomes_for_maintenance_work\"");
       expect(seededEvent.data_json).toContain("\"workClass\":\"diagnostic_work\"");
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });

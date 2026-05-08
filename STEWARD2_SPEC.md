@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-PD` merged via PR `#30` (2026-05-08). Steward2 now has a host-owned autonomy progress-discipline contract on `main`: bounded work classes terminate on `hard_fail`, permission-seeking maintenance/diagnostic/review churn is blocked, repeated bad same-class outcomes force a host-owned class boundary, and the invariant is proven with DB-row verification plus an end-to-end runtime trace. Next step: choose the next post-WS-PD slice before broader live autonomy scaling.**
+Current phase: **`WS-Z1` implemented on `ws-z1` (2026-05-08). Steward2 now has a persisted requirement-gap reopening layer for autonomy seeding: each seed decision records one queryable open gap in `steward_goal_gaps`, stale gaps are resolved when the active gap changes, and the classifier now derives the next work class from that persisted gap record instead of a transient branch. Next step: reviewer gate for `WS-Z1`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,8 +56,8 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing has advanced past the autonomy identity boundary; the next real live question is what harness layer comes after `WS-PD`
-- the next spec step is no longer reviewer validation; `WS-PD` is merged and the next step is selecting the next post-`WS-PD` slice
+- deployment testing has advanced past the autonomy identity boundary; the next real live question is how the harness reopens named gaps after each completed autonomy turn
+- the next spec step is reviewer validation for `WS-Z1`
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7130,6 +7130,128 @@ Next process step:
   - Zenith-inspired harness layer (`WS-Z1` onward)
   - or another explicitly mapped post-turn autonomy control slice if Zenith review changes the order
 
+### WS-Z1 — requirement-gap reopening registry (2026-05-08)
+
+Why this slice exists:
+- `WS-PD` fixed inside-turn autonomy churn
+- the next harness problem is what the host does after a turn finishes or before the next one starts
+- the classifier previously chose the next autonomy work class from transient DB heuristics only:
+  - no persisted gap object
+  - no queryable record of what unresolved requirement the host believed existed
+  - no explicit resolved/open transition when the governing gap changed
+- `WS-Z1` makes the next autonomy seed decision come from a persisted requirement-gap record
+
+Implementer: Codex
+
+Reviewer: Claude
+
+#### Intended invariant
+
+For every autonomy seed decision:
+- there must be one persisted open steward goal-gap record describing the currently governing unresolved gap
+- the next autonomy work class must be derived from that persisted gap record, not only from an ephemeral classifier branch
+- when the governing gap changes, the prior open gap must be resolved and the new gap must become the only open gap for that session
+- the gap decision must be queryable through both:
+  - `steward_goal_gaps`
+  - `autonomy.gap.recorded` events
+
+#### Target modules
+
+- `src/steward/autonomy/goal-gap-registry.ts`
+- `src/steward/autonomy/goal-gap-registry.test.ts`
+- `src/steward/autonomy/work-classifier.ts`
+- `src/steward/autonomy/work-classifier.test.ts`
+- `src/steward/autonomy/autonomy-runner.test.ts`
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/db/migrations/0007_goal_gaps.sql`
+- `src/steward/runtime/ws-a.integration.test.ts`
+
+#### Scope
+
+This slice delivers:
+- a persisted gap registry table:
+  - `steward_goal_gaps`
+- a new event kind:
+  - `autonomy.gap.recorded`
+- host-owned gap recording for current autonomy conditions:
+  - no proof yet
+  - active blockers
+  - consecutive primary failures
+  - audit missing / stale
+  - repeated bad maintenance outcomes via the existing progress-discipline boundary
+- classifier integration so seeding decisions now come from the recorded gap object
+
+#### Out of scope
+
+- full milestone/tester orchestration from later Zenith slices
+- new runtime execution behavior
+- replacing `WS-PD`, proof judge, or task-value logic
+
+#### Implementation record
+
+Delivered locally on `ws-z1`:
+- added `src/steward/autonomy/goal-gap-registry.ts`
+  - records the current governing autonomy gap into `steward_goal_gaps`
+  - resolves prior open gaps when the governing gap changes
+  - emits `autonomy.gap.recorded`
+  - reuses the existing progress-discipline class boundary where relevant
+- added migration `src/steward/db/migrations/0007_goal_gaps.sql`
+  - creates `steward_goal_gaps`
+  - adds an index on `(session_id, status, updated_ts)`
+- updated `src/steward/db/runtime-schema.ts`
+  - adds `autonomy.gap.recorded`
+  - adds `StewardGoalGapStatus` and `StewardGoalGapRow`
+- updated `src/steward/autonomy/work-classifier.ts`
+  - classifier now calls `recordCurrentAutonomyGoalGap(...)`
+  - return value now reflects the persisted gap record:
+    - `workClass`
+    - `reason`
+    - `gapId`
+    - `gapKind`
+- added `src/steward/autonomy/goal-gap-registry.test.ts`
+  - proof-first gap recording
+  - old-gap resolution + repeated-bad-outcome reroute recording
+- updated `src/steward/autonomy/work-classifier.test.ts`
+  - verifies a goal-gap row is created for the proof-first branch
+- updated `src/steward/autonomy/autonomy-runner.test.ts`
+  - verifies `autonomy.gap.recorded` exists on seeded autonomy paths
+  - verifies repeated-bad maintenance reroute also records the governing gap
+- updated `src/steward/runtime/ws-a.integration.test.ts`
+  - schema smoke now expects migration version `7`
+
+#### Required verification
+
+- `corepack pnpm exec vitest run src/steward/autonomy/goal-gap-registry.test.ts src/steward/autonomy/work-classifier.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+
+#### Local verification
+
+- `corepack pnpm exec vitest run src/steward/autonomy/goal-gap-registry.test.ts src/steward/autonomy/work-classifier.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+  - PASS: `4` files, `16` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+
+#### Reviewer gate
+
+PASS only if the reviewer can confirm all of the following:
+- each autonomy seed decision now has one persisted governing gap record
+- open/resolved gap transitions are host-owned and queryable
+- repeated bad-outcome reroutes are represented as named gaps, not only as transient classifier reasons
+- the classifier truly derives from the registry seam, not a duplicate parallel heuristic path
+- the new gap registry does not weaken the existing `WS-PD` class-boundary or user-turn rules
+
+#### Advancement gate
+
+Advance only after:
+- focused tests pass
+- TypeScript is clean
+- reviewer confirms the gap registry is the governing seam for post-turn requirement reopening
+- updated `STEWARD2_SPEC.md` handoff was received and matches the actual implemented module ownership and verification evidence
+
+Current carry-forwards:
+- none
+
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
 Why this slice exists:
@@ -8137,5 +8259,3 @@ No new carry-forwards.
 
 Next process step:
 - `STEWARD2 ADVANCE LM-C`
-
-

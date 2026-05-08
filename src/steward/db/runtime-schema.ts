@@ -25,6 +25,7 @@ export type StewardBlockerType =
 export type StewardBlockerStatus = "active" | "resolved";
 
 export type StewardEventKind =
+  | "autonomy.gap.recorded"
   | "autonomy.boot.recorded"
   | "autonomy.boot.skipped"
   | "autonomy.mode.updated"
@@ -155,6 +156,24 @@ export type StewardEventRow = {
 };
 
 export type StewardHostTaskStatus = "pending" | "running" | "done" | "failed" | "blocked";
+
+export type StewardGoalGapStatus = "open" | "resolved";
+
+export type StewardGoalGapRow = {
+  id: number;
+  sessionId: string;
+  sourceFlowId: number | null;
+  sourceHostTaskId: number | null;
+  gapKind: string;
+  workClass: string;
+  reason: string;
+  status: StewardGoalGapStatus;
+  title: string;
+  details: string;
+  evidenceJson: string;
+  createdTs: number;
+  updatedTs: number;
+};
 
 export type StewardHostTaskRow = {
   id: number;
