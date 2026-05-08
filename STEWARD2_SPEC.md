@@ -6991,6 +6991,98 @@ Local verification:
 - `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
   - PASS
 
+Verification gate record (2026-05-08, Codex):
+- branch: `ws-pd`
+- commit: `918892110cc462c188e85f034ff760bfeb2b555a`
+- pushed branch: `origin/ws-pd`
+
+Targeted WS-PD verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/progress-discipline.test.ts src/steward/autonomy/autonomy-executor.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+  - PASS: `4` files, `27` tests
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+
+Existing OpenClaw regression verification:
+- `corepack pnpm exec vitest run src/agents/pi-embedded-subscribe.handlers.lifecycle.test.ts src/agents/pi-embedded-subscribe.handlers.tools.test.ts src/agents/pi-tools.before-tool-call.integration.e2e.test.ts`
+  - PASS: `2` files, `43` tests
+- note on existing suite scope:
+  - `src/agents/pi-tool-definition-adapter.test.ts` still has pre-existing expectation failures unrelated to `WS-PD`
+  - current failures are older postcheck-shape expectations:
+    - `details.stewardPostcheck` is now present where the old test expected only the legacy payload
+    - one exec error assertion expects the old string shape
+  - `WS-PD` did not touch that adapter seam, so this was not counted as a `WS-PD` regression
+
+Direct DB artifact inspection:
+- one bounded maintenance autonomy hard-fail trace was executed through the real `runAutonomyExecuteCycle(...)` seam against a fresh temporary steward DB
+- repeated-bad-outcome class-boundary evidence was also inspected directly from DB rows
+
+Bounded maintenance hard-fail row values:
+- `steward_host_tasks`
+  - `id = 1`
+  - `seed_flow_id = 1`
+  - `work_class = "maintenance_work"`
+  - `status = "failed"`
+  - `claimed_at = 2200`
+  - `completed_at = null`
+  - `failed_at = 1778252793131`
+- `steward_flows`
+  - `id = 1`
+  - `flow_type = "maintenance"`
+  - `status = "completed"`
+- `steward_flow_tasks`
+  - `flow_id = 1`
+  - `task_id = 1`
+  - `role = "diagnostic"`
+  - `link_status = "failed"`
+- `steward_runtime_state`
+  - `status = "idle"`
+  - `active_flow_id = null`
+  - `active_task_id = null`
+  - `last_error` contains `hard_fail_not_allowed_for_bounded_work`
+
+End-to-end runtime trace proving the invariant:
+1. `autonomy.triage.recorded`
+2. `autonomy.task.seeded`
+3. `autonomy.execution.requested`
+4. `runtime.started`
+5. `runtime.stream_started`
+6. `runtime.stream_first_event`
+7. `autonomy.progress.policy`
+   - `scope = "tool_postcheck"`
+   - `action = "terminate_turn"`
+   - `reason = "hard_fail_not_allowed_for_bounded_work"`
+   - `workClass = "maintenance_work"`
+   - `toolName = "web_fetch"`
+8. `runtime.stream_terminal`
+   - `outcome = "failed"`
+   - `sawFirstEvent = true`
+9. `runtime.idle`
+   - `triggerSource = "autonomy"`
+   - `terminalTaskStatus = "failed"`
+10. `autonomy.execution.failed`
+
+Repeated bad-outcome class-boundary DB evidence:
+- prior failed autonomy host-task rows:
+  - `id = 31`, `seed_flow_id = 31`, `work_class = "maintenance_work"`, `status = "failed"`
+  - `id = 32`, `seed_flow_id = 32`, `work_class = "maintenance_work"`, `status = "failed"`
+- corresponding `runtime.idle` rows:
+  - `flow_id = 31`, `proofVerdict = "rejected"`, `taskValueLabel = "hollow"`
+  - `flow_id = 32`, `proofVerdict = "rejected"`, `taskValueLabel = "low_value"`
+- resolved host-owned boundary:
+  - `workClass = "diagnostic_work"`
+  - `reason = "repeated_bad_outcomes_for_maintenance_work"`
+  - `boundaryApplied = true`
+  - `recentBadOutcomeCount = 2`
+
+Verification verdict:
+- PASS
+- the WS-PD invariant is proven at the database/evidence level:
+  - host-owned hard-fail policy is queryable
+  - maintenance autonomy terminates instead of churning
+  - runtime / flow-task / host-task terminalize consistently
+  - repeated bad same-class outcomes feed a host-owned class boundary
+  - user-turn smoke remains covered in the targeted suite
+
 Plan review record (2026-05-08, Claude):
 - verdict: PASS — plan was structurally sound and ready for implementation
 - findings 1–3 are now resolved in the implemented slice:
@@ -8018,7 +8110,6 @@ No new carry-forwards.
 
 Next process step:
 - `STEWARD2 ADVANCE LM-C`
-
 
 
 
