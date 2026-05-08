@@ -7249,8 +7249,23 @@ Advance only after:
 - reviewer confirms the gap registry is the governing seam for post-turn requirement reopening
 - updated `STEWARD2_SPEC.md` handoff was received and matches the actual implemented module ownership and verification evidence
 
+Review gate record (2026-05-08, Claude):
+- verdict: PASS
+- all 5 reviewer gate conditions confirmed:
+  - gap per seed decision: `classifyAutonomyWork` → `recordCurrentAutonomyGoalGap` always writes a `steward_goal_gaps` row and emits `autonomy.gap.recorded` before returning. Confirmed by `autonomy-runner.test.ts` seed test (gapEvent + gapRow both directly inspected). ✓
+  - open/resolved transitions host-owned: `UPDATE ... SET status = 'resolved'` fires on prior gap before new insert when governing condition changes. `goal-gap-registry.test.ts` test 2 shows rows[0] → resolved, rows[1] → open. DB-only, no in-memory state. ✓
+  - repeated bad-outcome reroutes as named gaps: `proposeCurrentGap` delegates to `resolveAutonomyWorkClassBoundary` from progress-discipline; persists gap with `gapKind = "repeated_bad_outcomes_for_maintenance_work"`. Confirmed in `autonomy-runner.test.ts` boundary test. ✓
+  - classifier derives from registry seam only: `work-classifier.ts` is now 31 lines with zero logic — delegates entirely to `recordCurrentAutonomyGoalGap`. No parallel heuristic path. ✓
+  - WS-PD not weakened: `goal-gap-registry.ts` imports and reuses `resolveAutonomyWorkClassBoundary` — does not duplicate it. User-turn path unaffected; `resolveActiveAutonomyContext` still gates all progress-discipline decisions on `triggerSource`. ✓
+- structural carry-forward — must be resolved before advancement:
+  - AC-1 and AC-5 from the WS-Z1 spec acceptance conditions are not implemented: when `proof_verdict = accepted` and no semantic gaps remain, the host must emit a stop signal (gap kind `goal_closed` or equivalent) persisted in DB and suppress further reseeding of `goal_work`. The implementation falls through silently to `maintenance_work` — no stop path, no closure record, no regression test for this path.
+  - Resolution: Codex chooses one of two options before advancement:
+    - Option A: implement the closed-goal stop path in `goal-gap-registry.ts` with a new gap kind, a DB row, and a focused test.
+    - Option B: descope AC-1/AC-5 to WS-Z5 (stopping controller) with a spec update removing the stop-signal requirement from WS-Z1 acceptance conditions — scoping it there is defensible since stopping discipline is WS-Z5's defined responsibility.
+  - until one option is chosen and committed, WS-Z1 advancement gate is blocked on this carry-forward.
+
 Current carry-forwards:
-- none
+- AC-1/AC-5 stop-signal gap: closed-goal suppression not implemented; Codex must choose Option A (implement) or Option B (descope to WS-Z5) before advancement.
 
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
