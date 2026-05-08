@@ -665,4 +665,137 @@ describe("WS-L autonomy executor", () => {
       expect(terminalEvent.data_json).toContain("watchdog timeout");
     });
   });
+
+  it("terminates a maintenance autonomy turn immediately after a hard-fail tool result", async () => {
+    await withTempStore(async ({ artifactRoot, storePath }) => {
+      const sessionKey = "agent:main:webchat:direct:ws-pd-hard-fail";
+      const authority = getOrCreateStewardSession(sessionKey, 2_100);
+      const seeded = await seedIdleAutonomyTask({
+        sessionId: authority.sessionId,
+        sessionKey,
+        workClass: "maintenance_work",
+        classificationReason: "baseline_maintenance_window",
+        artifactRoot,
+        now: 2_150,
+      });
+      expect(seeded.seeded).toBe(true);
+
+      const runAgent = vi.fn().mockImplementation(
+        (runParams: {
+          abortSignal?: AbortSignal;
+          onAgentEvent?: (evt: { stream: string; data: Record<string, unknown> }) => void;
+        }) =>
+          new Promise((resolve, reject) => {
+            runParams.abortSignal?.addEventListener(
+              "abort",
+              () => reject(runParams.abortSignal?.reason ?? new Error("aborted")),
+              { once: true },
+            );
+            runParams.onAgentEvent?.({
+              stream: "tool",
+              data: {
+                phase: "result",
+                name: "web_fetch",
+                toolCallId: "call-hard-fail",
+                result: {
+                  details: {
+                    stewardPostcheck: {
+                      verdict: "hard_fail",
+                      reason: "wrapped external-content / unusable 400",
+                    },
+                  },
+                },
+              },
+            });
+            setTimeout(() => resolve({ payloads: [], meta: { durationMs: 1, aborted: false } }), 25);
+          }),
+      );
+
+      const result = await runAutonomyExecuteCycle({
+        cfg: {} as never,
+        sessionKey,
+        storePath,
+        now: 2_200,
+        runAgent: runAgent as never,
+        modelResolverDeps: createAutonomyModelResolverDeps(),
+      });
+      const policyEvent = getDb()
+        .prepare(
+          `SELECT data_json
+           FROM steward_events
+           WHERE kind = 'autonomy.progress.policy'
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get() as { data_json: string };
+
+      expect(result).toMatchObject({
+        status: "claimed",
+        outcome: "failed",
+      });
+      expect(policyEvent.data_json).toContain("\"scope\":\"tool_postcheck\"");
+      expect(policyEvent.data_json).toContain("\"reason\":\"hard_fail_not_allowed_for_bounded_work\"");
+    });
+  });
+
+  it("terminates maintenance autonomy when the assistant asks for permission", async () => {
+    await withTempStore(async ({ artifactRoot, storePath }) => {
+      const sessionKey = "agent:main:webchat:direct:ws-pd-permission";
+      const authority = getOrCreateStewardSession(sessionKey, 2_300);
+      const seeded = await seedIdleAutonomyTask({
+        sessionId: authority.sessionId,
+        sessionKey,
+        workClass: "maintenance_work",
+        classificationReason: "baseline_maintenance_window",
+        artifactRoot,
+        now: 2_350,
+      });
+      expect(seeded.seeded).toBe(true);
+
+      const runAgent = vi.fn().mockImplementation(
+        (runParams: {
+          abortSignal?: AbortSignal;
+          onAgentEvent?: (evt: { stream: string; data: Record<string, unknown> }) => void;
+        }) =>
+          new Promise((_, reject) => {
+            runParams.abortSignal?.addEventListener(
+              "abort",
+              () => reject(runParams.abortSignal?.reason ?? new Error("aborted")),
+              { once: true },
+            );
+            runParams.onAgentEvent?.({
+              stream: "assistant",
+              data: {
+                text: "Please reply with 1 to approve the healthcheck before I continue.",
+              },
+            });
+          }),
+      );
+
+      const result = await runAutonomyExecuteCycle({
+        cfg: {} as never,
+        sessionKey,
+        storePath,
+        now: 2_400,
+        runAgent: runAgent as never,
+        modelResolverDeps: createAutonomyModelResolverDeps(),
+      });
+      const policyEvent = getDb()
+        .prepare(
+          `SELECT data_json
+           FROM steward_events
+           WHERE kind = 'autonomy.progress.policy'
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get() as { data_json: string };
+
+      expect(result).toMatchObject({
+        status: "claimed",
+        outcome: "failed",
+      });
+      expect(policyEvent.data_json).toContain("\"scope\":\"assistant_output\"");
+      expect(policyEvent.data_json).toContain("\"reason\":\"permission_seeking_not_allowed_for_autonomy_work_class\"");
+    });
+  });
 });

@@ -7,6 +7,7 @@ import {
 import { evaluateAutonomyRunPolicy } from "./autonomy-policy.js";
 import { classifyAutonomyWork, type AutonomyWorkClass } from "./work-classifier.js";
 import { seedIdleAutonomyTask } from "./idle-seeding.js";
+import { appendAutonomyProgressDecisionEvent } from "./progress-discipline.js";
 
 const INITIAL_IDLE_BACKOFF_MS = 60_000;
 const MAX_IDLE_BACKOFF_MS = 15 * 60 * 1000;
@@ -85,6 +86,23 @@ export async function runAutonomyTick(params: {
     sessionId: decision.sessionId,
     now,
   });
+  if (classification.reason.startsWith("repeated_bad_outcomes_for_")) {
+    appendAutonomyProgressDecisionEvent({
+      sessionKey: params.sessionKey,
+      now,
+      decision: {
+        action: "continue",
+        reason: classification.reason,
+        scope: "work_class_boundary",
+        workClass: classification.workClass,
+        hostTaskId: null,
+        flowId: null,
+        details: {
+          classificationReason: classification.reason,
+        },
+      },
+    });
+  }
   const seeded = await seedIdleAutonomyTask({
     sessionId: decision.sessionId,
     sessionKey: params.sessionKey,

@@ -134,4 +134,108 @@ describe("WS-IC autonomy runner", () => {
     expect(Number(nextAllowed.v)).toBeGreaterThan(1_200);
     expect(noopEvent.data_json).toContain("\"reason\":\"duplicate_seed_suppressed\"");
   });
+
+  it("applies a host-owned class boundary after repeated bad maintenance outcomes", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-runner-boundary-"));
+    try {
+      const sessionKey = "agent:main:webchat:direct:auto-boundary";
+      const authority = getOrCreateStewardSession(sessionKey, 2_000);
+      setAutonomyMode({ mode: "assistant_plus_autonomy", now: 2_050 });
+      markAutonomyBootCompleted({ completed: true, now: 2_100 });
+      getDb()
+        .prepare(
+          `INSERT INTO steward_proofs (
+             task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+             verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+           ) VALUES (NULL, ?, NULL, 'general', 'proof', 'accepted', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)` ,
+        )
+        .run(authority.sessionId, 2_110, 2_110);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+           VALUES (?, ?, NULL, 'mission.audit.report', 'audit', '{}')` ,
+        )
+        .run(2_115, authority.sessionId);
+
+      getDb()
+        .prepare(
+          `INSERT INTO steward_flows (
+             id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+           ) VALUES (?, ?, 'maintenance', 'completed', ?, ?, ?, ?, ?)` ,
+        )
+        .run(
+          41,
+          authority.sessionId,
+          JSON.stringify({ seeded_by: "autonomy", autonomy_work_class: "maintenance_work" }),
+          process.pid,
+          2_120,
+          2_120,
+          2_120,
+        );
+      getDb()
+        .prepare(
+          `INSERT INTO steward_host_tasks (
+             id, session_id, source, status, seed_flow_id, work_class, title, details, created_ts, updated_ts
+           ) VALUES (?, ?, 'autonomy', 'failed', ?, 'maintenance_work', 'Task 1', 'Details', ?, ?)` ,
+        )
+        .run(41, authority.sessionId, 41, 2_120, 2_120);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_flows (
+             id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+           ) VALUES (?, ?, 'maintenance', 'completed', ?, ?, ?, ?, ?)` ,
+        )
+        .run(
+          42,
+          authority.sessionId,
+          JSON.stringify({ seeded_by: "autonomy", autonomy_work_class: "maintenance_work" }),
+          process.pid,
+          2_140,
+          2_140,
+          2_140,
+        );
+      getDb()
+        .prepare(
+          `INSERT INTO steward_host_tasks (
+             id, session_id, source, status, seed_flow_id, work_class, title, details, created_ts, updated_ts
+           ) VALUES (?, ?, 'autonomy', 'failed', ?, 'maintenance_work', 'Task 2', 'Details', ?, ?)` ,
+        )
+        .run(42, authority.sessionId, 42, 2_140, 2_140);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+           VALUES (?, ?, ?, 'runtime.idle', 'Turn completed', ?)` ,
+        )
+        .run(2_141, authority.sessionId, 41, JSON.stringify({ proofVerdict: "rejected", taskValueLabel: "hollow" }));
+      getDb()
+        .prepare(
+          `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+           VALUES (?, ?, ?, 'runtime.idle', 'Turn completed', ?)` ,
+        )
+        .run(2_142, authority.sessionId, 42, JSON.stringify({ proofVerdict: "rejected", taskValueLabel: "low_value" }));
+
+      const result = await runAutonomyTick({
+        sessionKey,
+        artifactRoot: tempRoot,
+        now: 2_200,
+      });
+      const seededEvent = getDb()
+        .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.task.seeded' ORDER BY id DESC LIMIT 1`)
+        .get() as { data_json: string };
+      const boundaryEvent = getDb()
+        .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.progress.policy' ORDER BY id DESC LIMIT 1`)
+        .get() as { data_json: string };
+
+      expect(result).toMatchObject({
+        status: "seeded",
+        workClass: "diagnostic_work",
+        reason: "repeated_bad_outcomes_for_maintenance_work",
+      });
+      expect(boundaryEvent.data_json).toContain("\"scope\":\"work_class_boundary\"");
+      expect(boundaryEvent.data_json).toContain("\"reason\":\"repeated_bad_outcomes_for_maintenance_work\"");
+      expect(seededEvent.data_json).toContain("\"workClass\":\"diagnostic_work\"");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

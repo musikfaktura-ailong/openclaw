@@ -1,4 +1,5 @@
 import { getDb } from "../db/db-bootstrap.js";
+import { resolveAutonomyWorkClassBoundary } from "./progress-discipline.js";
 
 export type AutonomyWorkClass =
   | "goal_work"
@@ -31,17 +32,25 @@ export function classifyAutonomyWork(params: {
     params.sessionId,
   );
   if (activeBlockers > 0) {
+    const boundary = resolveAutonomyWorkClassBoundary({
+      sessionId: params.sessionId,
+      proposedWorkClass: "diagnostic_work",
+    });
     return {
-      workClass: "diagnostic_work",
-      reason: "active_blockers_present",
+      workClass: boundary.workClass,
+      reason: boundary.boundaryApplied ? boundary.reason : "active_blockers_present",
     };
   }
 
   const proofCount = countRows(`SELECT COUNT(*) AS count FROM steward_proofs WHERE session_id = ?`, params.sessionId);
   if (proofCount === 0) {
+    const boundary = resolveAutonomyWorkClassBoundary({
+      sessionId: params.sessionId,
+      proposedWorkClass: "goal_work",
+    });
     return {
-      workClass: "goal_work",
-      reason: "no_recorded_proof_yet",
+      workClass: boundary.workClass,
+      reason: boundary.boundaryApplied ? boundary.reason : "no_recorded_proof_yet",
     };
   }
 
@@ -60,9 +69,13 @@ export function classifyAutonomyWork(params: {
     params.sessionId,
   );
   if (recentPrimaryFailures >= 2) {
+    const boundary = resolveAutonomyWorkClassBoundary({
+      sessionId: params.sessionId,
+      proposedWorkClass: "diagnostic_work",
+    });
     return {
-      workClass: "diagnostic_work",
-      reason: "consecutive_primary_failures",
+      workClass: boundary.workClass,
+      reason: boundary.boundaryApplied ? boundary.reason : "consecutive_primary_failures",
     };
   }
 
@@ -77,14 +90,26 @@ export function classifyAutonomyWork(params: {
   const hasSessionEvents = countRows(`SELECT COUNT(*) AS count FROM steward_events WHERE session_id = ?`, params.sessionId);
   const reviewWindowMs = 24 * 60 * 60 * 1000;
   if (hasSessionEvents > 0 && (lastAuditTsRow.ts == null || now - Number(lastAuditTsRow.ts) >= reviewWindowMs)) {
+    const boundary = resolveAutonomyWorkClassBoundary({
+      sessionId: params.sessionId,
+      proposedWorkClass: "review_or_consolidation",
+    });
     return {
-      workClass: "review_or_consolidation",
-      reason: lastAuditTsRow.ts == null ? "audit_missing" : "audit_stale",
+      workClass: boundary.workClass,
+      reason: boundary.boundaryApplied
+        ? boundary.reason
+        : lastAuditTsRow.ts == null
+          ? "audit_missing"
+          : "audit_stale",
     };
   }
 
+  const boundary = resolveAutonomyWorkClassBoundary({
+    sessionId: params.sessionId,
+    proposedWorkClass: "maintenance_work",
+  });
   return {
-    workClass: "maintenance_work",
-    reason: "baseline_maintenance_window",
+    workClass: boundary.workClass,
+    reason: boundary.boundaryApplied ? boundary.reason : "baseline_maintenance_window",
   };
 }

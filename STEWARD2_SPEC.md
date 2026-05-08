@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-N` merged via PR #29 (2026-05-07). Autonomy host-task execution is now bound to an explicit seeded-flow identity pair instead of inferred `task_id` ownership: `seed_flow_id` is persisted on `steward_host_tasks`, seed creation is atomic, claim/execution bind only to `(host_task_id, seed_flow_id)`, and the collision regression proves runtime flow/task numeric reuse cannot steal autonomy flow ownership. Next step: resume live deployment testing on merged `main`.**
+Current phase: **WS-PD implemented on `ws-pd` (2026-05-08). Clean DB boot, autonomy seeding, LM Studio selection, seeded-flow identity, and bounded execution are all working on merged `main`. The new host-owned progress-discipline contract is now implemented locally and ready for reviewer gate before another live rerun.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,7 +56,8 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing can resume from the autonomy identity boundary on merged `main`
+- deployment testing has advanced past the autonomy identity boundary; the next real live bug is long-turn autonomy churn after poor tool/path selection
+- the next spec step is complete: the progress-discipline contract is now implemented locally and the next step is reviewer validation before another live rerun
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -6679,20 +6680,333 @@ Advancement gate:
   - collision regression passes
   - live duplicate-suppression poisoning is no longer structurally possible for this class
 
+## Live deployment follow-up — clean-start long-turn autonomy churn after `WS-N` (2026-05-08)
+
+Why this section exists:
+- the live DB was reset completely and restarted from merged `main`
+- that removed the old scheduler residue and proved `WS-N` on a truly clean run
+- the next live failure is therefore not legacy state contamination
+
+### What clean start proved
+
+From a fresh `steward.db`:
+
+- gateway booted cleanly
+- schema initialized at `user_version = 6`
+- `seed_flow_id` was present immediately
+- autonomy mode switched from `assistant_only` to `assistant_plus_autonomy`
+- the first real autonomy run did the correct host steps:
+  - `autonomy.task.seeded`
+  - `autonomy.execution.requested`
+  - `runtime.started`
+  - `runtime.stream_started`
+  - `runtime.stream_first_event`
+- LM Studio path was correct:
+  - provider = `lmstudio`
+  - model = `qwen/qwen3-14b`
+  - lifecycle context = `16384`
+
+So the steward is now past:
+- startup-readiness lies
+- LM Studio wrong-model / wrong-context drift
+- seed-only autonomy
+- missing execution handoff
+- missing bounded terminalization
+- autonomy flow identity collision
+- stale poisoned DB residue
+
+### Exact clean-run behavior
+
+The first clean `goal_work` turn:
+- seeded `host_task_id = 1`
+- seeded `flow_id = 1`
+- bound correctly as `(1, 1)`
+
+Then inside the active turn:
+- the model chose `web_fetch`
+- the fetch targets were poor:
+  - `https://coins.llama.fi/defi-stats` -> wrapped external-content / unusable `400`
+  - `https://www.coins.llama.fi/protocols` -> DNS failure
+  - `https://coins.llama.fi/protocols` -> `402`
+- `tool.postcheck.classified` correctly marked these as `hard_fail`
+- but the run kept continuing through further LM lifecycle/query-lock passes
+- only much later did the turn terminalize:
+  - `proof.rejected`
+  - `task_value = hollow`
+  - `runtime.idle`
+  - `autonomy.execution.failed`
+
+After that, later autonomy ticks seeded maintenance work:
+- `host_task_id = 2`, `flow_id = 3`
+- `host_task_id = 3`, `flow_id = 5`
+- `host_task_id = 4`, `flow_id = 6`
+
+The same class repeated:
+- long running autonomy turn
+- eventual rejected / hollow / failed outcome
+- governor drift follow-up also created a control flow (`flow_id = 4`, `task_id = 4`) that is left `resumable/pending`
+
+### Transcript evidence
+
+The session transcript shows the model is not trapped before the first response.
+
+It is actively reasoning and making poor bounded choices such as:
+- using `web_fetch` against unsuitable or blocked targets
+- pivoting research into low-value internal OpenClaw/skills “opportunities”
+- turning maintenance work into a permission request for `healthcheck`, which cannot advance autonomy
+
+So the live problem is not “no model output”.
+It is:
+- model-driven long-turn churn inside a technically functioning runtime
+
+### Invariant now violated
+
+Autonomy work must be bounded not only by timeouts, but by meaningful host-owned progress rules.
+
+More concretely:
+- one autonomy turn must not spend tens of minutes retrying or pivoting across clearly low-value or structurally blocked paths
+- postcheck hard-fail evidence must not allow indefinite continuation without host-owned reroute or termination logic
+- maintenance autonomy must not devolve into “ask permission” loops that can never complete autonomously
+- repeated hollow/rejected autonomy outcomes of the same class must feed a structural stop/reroute boundary, not just more long turns
+
+### What this is not
+
+This is not:
+- a clean-start boot failure
+- an LM Studio load failure
+- an execution-handoff failure
+- an unbounded hang with no terminalization
+- an autonomy flow identity bug
+
+Those have already been crossed.
+
+### Consequences
+
+If left as-is:
+- the steward can technically run autonomously while still wasting long windows on bad work
+- task-value / proof / governor will keep registering drift, but only after costly turns finish
+- operator-visible “thinking” quality remains poor even though the runtime architecture now works
+- maintenance turns can produce permission-gated or non-autonomous outputs that are structurally unsuitable for autonomy
+
+### Structural direction
+
+The next fix must not be a local ban on one URL or one tool call.
+
+The host-owned class to map next is:
+- autonomy progress discipline / bounded retry-churn semantics
+
+That likely means explicitly mapping:
+- what counts as autonomous progress after tool failure
+- when a postcheck `hard_fail` must force reroute or immediate failure instead of another free-form continuation
+- which work classes may use permission-seeking behaviors at all
+- when repeated rejected/hollow outcomes of the same class force host-owned class change instead of reseeding the same family
+
+Before code, the next slice must define the invariant that prevents:
+- long low-value continuation churn
+- autonomy maintenance tasks that ask for permission they cannot obtain
+- repeated bad external-fetch retries from remaining “valid” just because the runtime still has time left
+
+### WS-PD — autonomy progress discipline and churn control (2026-05-08)
+
+Why this slice exists:
+- fresh live deployment after `WS-N` proved that Steward2 can now boot, seed, claim, execute, and terminalize autonomy turns through the unified runtime
+- the next failure is no longer architectural startup or identity
+- it is steward quality control inside a valid active turn:
+  - poor tool outcomes marked as `hard_fail` still allow more free-form continuation
+  - maintenance autonomy can drift into permission-seeking outputs it cannot satisfy
+  - repeated hollow/rejected work of the same class can keep consuming long windows before the host changes course
+- this slice is therefore the host-owned progress contract for autonomy, not a local URL/tool patch
+
+Implementer: Codex
+
+Reviewer: Claude
+
+#### Intended invariant
+
+For every autonomy-promoted turn:
+- host-visible `hard_fail` evidence must not permit unbounded continuation churn
+- autonomy work must either:
+  - produce bounded progress evidence toward its work class
+  - reroute deterministically to another allowed action class
+  - or fail/terminalize in bounded time without more free-form drift
+- autonomy work classes that cannot be completed without new operator permission must not remain in autonomous execution
+- repeated hollow/rejected outcomes in the same autonomy work class must feed a host-owned class change or cooldown boundary, not simple reseeding of the same class
+
+#### Target OpenClaw seam
+
+- OpenClaw continues to own the inner assistant/tool loop once a turn is active:
+  - tool execution
+  - stream continuation
+  - transcript/session persistence
+- Steward owns the autonomy progress discipline around that loop:
+  - interpretation of `tool.postcheck.classified`
+  - interpretation of repeated rejected/hollow outcomes
+  - autonomy-only permission boundaries
+  - class reroute / fail / cooldown decisions
+
+#### PEQS source modules
+
+- `C:\ai_agent\PEQS\core\tool_supervisor.py`
+- `C:\ai_agent\PEQS\core\maintenance_governor.py`
+- `C:\ai_agent\PEQS\core\metacog.py`
+- `C:\ai_agent\PEQS\core\task_value_adjudicator.py`
+- `C:\ai_agent\PEQS\core\strategy_validator.py`
+- failure references:
+  - `C:\ai_agent\PEQS\STEWARD_FAILURE_HISTORY.md` — `No Research Family Dead-End Injection`
+  - `C:\ai_agent\PEQS\STEWARD_FAILURE_HISTORY.md` — hollow fallback / runtime-recovery spam sections
+
+PEQS donor lesson:
+- the old steward failed when bad families, fallback chains, or recovery work remained structurally seedable after host evidence already said they were dead, hollow, or misaligned
+- Steward2 must not recreate that class one layer later inside long active turns
+
+#### Steward2 target modules
+
+- `src/steward/autonomy/progress-discipline.ts`
+- `src/steward/autonomy/progress-discipline.test.ts`
+- `src/steward/autonomy/autonomy-executor.ts`
+- `src/steward/autonomy/autonomy-executor.test.ts`
+- `src/steward/autonomy/autonomy-runner.ts`
+- `src/steward/autonomy/autonomy-runner.test.ts`
+- `src/steward/autonomy/work-classifier.ts`
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/runtime/ws-a.integration.test.ts`
+
+Existing steward seams intentionally consumed, not rewritten, in this slice:
+- `tool.postcheck.classified` from `src/steward/tool/tool-supervisor.ts`
+- proof/value outcome evidence from `src/steward/runtime/session-bridge.ts`
+
+#### Dependency list
+
+- `WS-M` merged: bounded execution + truthful chronology already on `main`
+- `WS-N` merged: seeded-flow identity already on `main`
+- clean live DB/transcript evidence from fresh `main` deployment on `2026-05-08`
+- existing `tool.postcheck.classified`, `proof.rejected`, `mission.task_value.adjudicated`, and autonomy events already persisted in the ledger
+
+#### Host-owned decisions for this slice
+
+1. Hard-fail continuation policy
+   - define which `tool.postcheck.classified = hard_fail` outcomes must force:
+     - immediate autonomy failure
+     - deterministic reroute
+     - or one bounded alternate action
+   - do not leave this to free-form repeated continuation
+
+2. Permission-seeking policy
+   - define which autonomy work classes are never allowed to end in new operator-permission requests
+   - maintenance / diagnostic autonomy must either:
+     - complete autonomously
+     - reroute into an autonomous-safe class
+     - or fail truthfully
+
+3. Repeated bad-outcome policy
+   - define how repeated `proof.rejected` / `task_value in {low_value, hollow}` outcomes of the same class feed:
+     - class cooldown
+     - class reroute
+     - or explicit dead-end memory / knowledge signal
+   - the host, not the model, owns this transition
+
+4. Progress evidence policy
+   - define what counts as bounded autonomy progress after a tool failure or pivot
+   - if no acceptable progress evidence exists, the host must stop or reroute the turn instead of letting runtime time alone decide
+
+#### Scope
+
+This slice should:
+- tighten autonomy-only continuation semantics after host-visible `hard_fail` evidence
+- block autonomy maintenance from devolving into permission-request loops
+- map how repeated hollow/rejected class outcomes change future class selection
+- persist enough evidence to prove these decisions happened in the ledger
+- add regression coverage for the clean-run failure class
+
+#### Out of scope
+
+This slice should not:
+- ban one specific URL/domain/tool by itself
+- weaken the generic user-turn OpenClaw assistant loop
+- redesign the entire planner or prompt stack
+- replace proof judge, task value, or metacog with prompt-only heuristics
+
+#### Acceptance evidence
+
+Advance only if all of the following are true:
+1. A clean autonomy turn that hits repeated `hard_fail` fetch outcomes no longer burns a long free-form continuation window; it reroutes or terminalizes by host policy.
+2. Maintenance autonomy can no longer produce a new permission-seeking output as a valid autonomous continuation path.
+3. Repeated rejected/hollow outcomes of the same autonomy work class produce a visible host-owned class boundary in persisted state or events.
+4. Existing user-turn behavior remains unchanged.
+5. The exact fresh-run failure class from `2026-05-08` has a regression test that proves it cannot recur through the same path.
+
+#### Required verification
+
+- focused autonomy progress-discipline tests
+- focused autonomy executor / bridge tests covering `hard_fail` continuation boundaries
+- focused maintenance-work tests covering permission-seeking rejection/reroute behavior
+- regression covering repeated rejected/hollow same-class outcomes
+- focused user-turn smoke test proving no autonomy-only rule leaked into the normal user-turn path
+- TypeScript clean
+- live rerun against merged `main` after implementation
+
+#### Implementer delivery rule
+
+Codex must deliver:
+- exact invariant implemented in steward-owned modules
+- updated `STEWARD2_SPEC.md` handoff
+- focused verification results
+- no advancement language in the implementation handoff
+
+#### Reviewer gate
+
+PASS only if the reviewer can confirm all of the following:
+- autonomy `hard_fail` continuation policy is host-owned and queryable
+- permission-seeking maintenance churn is structurally blocked, not cosmetically discouraged
+- repeated same-class hollow/rejected outcomes feed a host-owned class boundary
+- the clean-run failure class is covered by regression, not only described
+- user-turn behavior was not narrowed by the autonomy fix
+
+#### Advancement gate
+
+Advance only after:
+- focused tests pass
+- TypeScript is clean
+- reviewer confirms the fresh live bug class cannot recur through the same continuation path
+- the slice is ready for a live rerun on merged `main`
+- updated `STEWARD2_SPEC.md` handoff was received and matches the actual implemented module ownership and verification evidence
+
 Implementation record:
-- added migration `src/steward/db/migrations/0006_autonomy_seed_flow_identity.sql`
-- `steward_host_tasks` now owns explicit `seed_flow_id`
-- autonomy seeding now creates the seed-flow / host-task / flow-task identity pair inside one immediate transaction
-- claim path now binds only to the persisted `(host_task_id, seed_flow_id)` pair
-- inconsistent seeded-flow rows are rejected instead of silently rebinding by `task_id`
-- focused tests now assert against the exact seeded autonomy flow instead of ambiguous `task_id`-only lookup
-- new collision regression proves a runtime flow/task row with the same numeric `task_id` cannot steal autonomy execution ownership
+- added required steward-owned module `src/steward/autonomy/progress-discipline.ts`
+- autonomy tool-result policy is now host-owned at the executor boundary:
+  - one bounded `hard_fail` continuation is allowed only for `goal_work`
+  - bounded work classes (`maintenance_work`, `diagnostic_work`, `review_or_consolidation`) terminate immediately on `hard_fail`
+- autonomy assistant-output policy is now host-owned:
+  - maintenance/diagnostic/review autonomy cannot continue into permission-seeking outputs
+  - permission-seeking assistant text aborts the turn with persisted policy evidence
+- repeated bad same-class autonomy outcomes now feed a host-owned class boundary through `work-classifier.ts`
+  - repeated bad `maintenance_work` reroutes to `diagnostic_work`
+  - repeated bad `diagnostic_work` reroutes to `review_or_consolidation`
+- added queryable `autonomy.progress.policy` ledger events in `runtime-schema.ts`
+- updated `ws-a.integration.test.ts` smoke expectation to current schema version `6`
 
 Local verification:
-- `corepack pnpm exec vitest run src/steward/autonomy/goal-orchestrator.test.ts src/steward/autonomy/autonomy-executor.test.ts`
-  - PASS: `2` files, `16` tests
+- `corepack pnpm exec vitest run src/steward/autonomy/progress-discipline.test.ts src/steward/autonomy/autonomy-executor.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+  - PASS: `4` files, `27` tests
 - `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
   - PASS
+
+Plan review record (2026-05-08, Claude):
+- verdict: PASS — plan was structurally sound and ready for implementation
+- findings 1–3 are now resolved in the implemented slice:
+  - `progress-discipline.ts` is required and created
+  - user-turn smoke coverage was added to required verification and implemented
+  - advancement gate now explicitly requires the updated `STEWARD2_SPEC.md` handoff
+
+Review gate record (2026-05-08, Claude):
+- verdict: PASS
+- hard_fail continuation policy: host-owned in `progress-discipline.ts`. `goal_work` gets one bounded continuation then `terminate_turn`; all other work classes terminate immediately on any `hard_fail`. Decision is in host code, not prompt. `autonomy.progress.policy` event persisted on every decision.
+- permission-seeking boundary: structurally blocked via `evaluateAutonomyAssistantOutputDecision` intercepting the assistant stream. Non-goal-work classes abort the turn (real AbortController abort) and persist an event. `goal_work` is intentionally excluded from this gate — that work class may legitimately ask for clarification.
+- repeated same-class hollow/rejected boundary: `countRecentBadOutcomes` reads from DB, `resolveAutonomyWorkClassBoundary` applied at seeding time in `work-classifier.ts`. `maintenance_work` reroutes to `diagnostic_work`, `diagnostic_work` reroutes to `review_or_consolidation`. `autonomy.progress.policy` event at `scope: "work_class_boundary"` persisted at tick time in `autonomy-runner.ts`.
+- queryable policy evidence: `autonomy.progress.policy` registered in `StewardEventKind` union in `runtime-schema.ts`; persisted via `appendStewardEvent` in all three decision paths (tool_postcheck, assistant_output, work_class_boundary); both autonomy-executor integration tests query it directly from DB.
+- user-turn smoke: `progress-discipline.test.ts` test 4 marks runtime with `triggerSource: "user"`; `resolveActiveAutonomyContext` returns null; `evaluateAutonomyToolProgressDecision` returns null; no abort or policy event emitted.
+- focused verification evidence: 4 focused unit tests in `progress-discipline.test.ts`; 2 focused integration tests in `autonomy-executor.test.ts` (ws-pd-hard-fail, ws-pd-permission); 1 class-boundary integration test in `autonomy-runner.test.ts`; 27 tests across 4 files PASS; TypeScript clean.
+- non-structural note: unreachable `return null` after the try/catch in `pickAgentRegistryLmstudioAutonomyModel` (autonomy-executor.ts:243) — dead code, does not affect the WS-PD invariant, can be cleaned up opportunistically.
 
 Current carry-forwards:
 - none
@@ -7704,3 +8018,8 @@ No new carry-forwards.
 
 Next process step:
 - `STEWARD2 ADVANCE LM-C`
+
+
+
+
+

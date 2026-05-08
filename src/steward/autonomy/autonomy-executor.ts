@@ -27,6 +27,11 @@ import { markRuntimeIdle } from "../runtime/runtime-state-repo.js";
 import { getOrCreateStewardSession } from "../runtime/session-authority.js";
 import { recordStewardTurnStart, recordTurnComplete } from "../runtime/runtime-bridge.js";
 import { loadTriageArtifact } from "./triage-artifacts.js";
+import {
+  appendAutonomyProgressDecisionEvent,
+  evaluateAutonomyAssistantOutputDecision,
+  evaluateAutonomyToolProgressDecision,
+} from "./progress-discipline.js";
 
 type ClaimedAutonomyTask = {
   hostTaskId: number;
@@ -376,6 +381,8 @@ function resolveAutonomyTerminalOutcome(params: {
 type AutonomyExecutionTelemetryState = {
   streamStarted: boolean;
   streamFirstEvent: boolean;
+  hardFailCount: number;
+  terminatedByPolicy: boolean;
 };
 
 function appendAutonomyStreamEvent(params: {
@@ -409,24 +416,86 @@ function createAutonomyAgentEventObserver(params: {
   hostTask: ClaimedAutonomyTask;
   sessionKey: string;
   telemetry: AutonomyExecutionTelemetryState;
+  abortController: AbortController;
 }): NonNullable<Parameters<typeof runEmbeddedPiAgent>[0]["onAgentEvent"]> {
   return (evt) => {
-    if (params.telemetry.streamFirstEvent) {
+    if (!params.telemetry.streamFirstEvent) {
+      params.telemetry.streamFirstEvent = true;
+      appendAutonomyStreamEvent({
+        kind: "runtime.stream_first_event",
+        sessionId: params.hostTask.sessionId,
+        flowId: params.hostTask.flowId,
+        sessionKey: params.sessionKey,
+        hostTaskId: params.hostTask.hostTaskId,
+        taskId: params.hostTask.taskId,
+        data: {
+          stream: evt.stream,
+          ...(evt.data ? { event: evt.data } : {}),
+        },
+      });
+    }
+
+    if (params.telemetry.terminatedByPolicy) {
       return;
     }
-    params.telemetry.streamFirstEvent = true;
-    appendAutonomyStreamEvent({
-      kind: "runtime.stream_first_event",
-      sessionId: params.hostTask.sessionId,
-      flowId: params.hostTask.flowId,
+    if (evt.stream === "tool") {
+      const data =
+        evt.data && typeof evt.data === "object" && !Array.isArray(evt.data)
+          ? (evt.data as Record<string, unknown>)
+          : null;
+      if (data?.phase !== "result" || !data.name) {
+        return;
+      }
+      const decision = evaluateAutonomyToolProgressDecision({
+        sessionKey: params.sessionKey,
+        toolName: String(data.name),
+        toolCallId: typeof data.toolCallId === "string" ? data.toolCallId : null,
+        result: data.result,
+        hardFailCount: params.telemetry.hardFailCount,
+      });
+      if (!decision) {
+        return;
+      }
+      if (decision.hardFailCount != null) {
+        params.telemetry.hardFailCount = decision.hardFailCount;
+      }
+      appendAutonomyProgressDecisionEvent({
+        sessionKey: params.sessionKey,
+        decision,
+      });
+      if (decision.action === "terminate_turn") {
+        params.telemetry.terminatedByPolicy = true;
+        abortAutonomyRun(
+          params.abortController,
+          new Error(`Steward autonomy progress discipline: ${decision.reason}`),
+        );
+      }
+      return;
+    }
+    if (evt.stream !== "assistant") {
+      return;
+    }
+    const data =
+      evt.data && typeof evt.data === "object" && !Array.isArray(evt.data)
+        ? (evt.data as Record<string, unknown>)
+        : null;
+    const text = typeof data?.text === "string" ? data.text : "";
+    const decision = evaluateAutonomyAssistantOutputDecision({
       sessionKey: params.sessionKey,
-      hostTaskId: params.hostTask.hostTaskId,
-      taskId: params.hostTask.taskId,
-      data: {
-        stream: evt.stream,
-        ...(evt.data ? { event: evt.data } : {}),
-      },
+      text,
     });
+    if (!decision) {
+      return;
+    }
+    appendAutonomyProgressDecisionEvent({
+      sessionKey: params.sessionKey,
+      decision,
+    });
+    params.telemetry.terminatedByPolicy = true;
+    abortAutonomyRun(
+      params.abortController,
+      new Error(`Steward autonomy progress discipline: ${decision.reason}`),
+    );
   };
 }
 
@@ -804,6 +873,8 @@ export async function runAutonomyExecuteCycle(params: {
   const telemetry: AutonomyExecutionTelemetryState = {
     streamStarted: false,
     streamFirstEvent: false,
+    hardFailCount: 0,
+    terminatedByPolicy: false,
   };
 
   try {
@@ -817,6 +888,7 @@ export async function runAutonomyExecuteCycle(params: {
         hostTask,
         sessionKey: params.sessionKey,
         telemetry,
+        abortController,
       }),
       timingOverrides: params.timingOverrides,
       modelResolverDeps: params.modelResolverDeps,
