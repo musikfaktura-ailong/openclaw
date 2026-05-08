@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z1` implemented on `ws-z1` (2026-05-08). Steward2 now has a persisted requirement-gap reopening layer for autonomy seeding: each seed decision records one queryable open gap in `steward_goal_gaps`, stale gaps are resolved when the active gap changes, and the classifier now derives the next work class from that persisted gap record instead of a transient branch. Next step: reviewer gate for `WS-Z1`.**
+Current phase: **WS-Z1 advanced (2026-05-08). Gap recording and class derivation are the governing seam for autonomy seeding. WS-Z2 (independent tester work class) is open for spec analysis. Closed-goal stopping deferred to WS-Z5.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -579,6 +579,9 @@ This board is the single glanceable source of implementation readiness.
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `implement` | `yes` | depends on `A`, `E`, `G` — all `advance-ready`; opened for implementation 2026-04-24 |
+| PD | Autonomy progress discipline | `confirm` | `yes` | confirmed 2026-05-08; all 5 AC satisfied; ready for advancement gate |
+| Z1 | Autonomy goal-gap registry | `advance-ready` | `yes` | advanced 2026-05-08; AC-1/AC-5 stop-signal descoped to WS-Z5; gap recording + class derivation complete |
+| Z2 | Independent tester work class | `analyze` | `no` | depends on Z1 advance-ready (done); needs full spec before implement |
 
 Interpretation:
 - `Current state` must be one of `analyze`, `implement`, `confirm`, or `advance-ready`
@@ -7278,6 +7281,17 @@ Current carry-forwards:
 Deferred to `WS-Z5`:
 - host-owned `goal_closed` / stop-signal emission when proof is accepted and no semantic gap remains
 - suppression of further autonomy reseeding based on that explicit closed-goal stop state
+
+Advancement gate record (2026-05-08, Claude):
+- verdict: ADVANCE
+- structural carry-forward resolution: Option B accepted — AC-1/AC-5 stop-signal requirement removed from WS-Z1 scope; closed-goal stopping formally deferred to WS-Z5 (stopping and replanning controller); WS-Z1 spec scope is now cleanly "gap recording and class derivation only"
+- all advancement gate conditions met:
+  - 16 focused tests pass across 4 files ✓
+  - TypeScript clean ✓
+  - reviewer confirmed gap registry is the governing seam for post-turn requirement reopening ✓
+  - spec handoff matches implemented module ownership ✓
+- status board: WS-Z1 → `advance-ready`
+- next: WS-Z2 (independent tester work class) requires full spec before implementation; add to status board as `analyze`
 
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
