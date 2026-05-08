@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-PD implemented on `ws-pd` (2026-05-08). Clean DB boot, autonomy seeding, LM Studio selection, seeded-flow identity, and bounded execution are all working on merged `main`. The new host-owned progress-discipline contract is now implemented locally and ready for reviewer gate before another live rerun.**
+Current phase: **`WS-PD` merged via PR `#30` (2026-05-08). Steward2 now has a host-owned autonomy progress-discipline contract on `main`: bounded work classes terminate on `hard_fail`, permission-seeking maintenance/diagnostic/review churn is blocked, repeated bad same-class outcomes force a host-owned class boundary, and the invariant is proven with DB-row verification plus an end-to-end runtime trace. Next step: choose the next post-WS-PD slice before broader live autonomy scaling.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,8 +56,8 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing has advanced past the autonomy identity boundary; the next real live bug is long-turn autonomy churn after poor tool/path selection
-- the next spec step is complete: the progress-discipline contract is now implemented locally and the next step is reviewer validation before another live rerun
+- deployment testing has advanced past the autonomy identity boundary; the next real live question is what harness layer comes after `WS-PD`
+- the next spec step is no longer reviewer validation; `WS-PD` is merged and the next step is selecting the next post-`WS-PD` slice
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7103,6 +7103,33 @@ Review gate record (2026-05-08, Claude):
 Current carry-forwards:
 - none
 
+## WS-PD post-merge reconciliation (2026-05-08)
+
+Merge result:
+- `WS-PD` merged via PR `#30`
+
+Reconciliation:
+- the autonomy progress-discipline contract is now on `main`
+- bounded autonomy work classes no longer burn long continuation windows after host-visible `hard_fail`
+- permission-seeking maintenance / diagnostic / review churn is structurally blocked at the steward-owned executor boundary
+- repeated bad same-class outcomes now force a host-owned class boundary instead of simple reseeding of the same class
+- verification evidence is recorded directly in this spec:
+  - targeted suite results
+  - existing OpenClaw regression results
+  - direct DB row inspection
+  - one end-to-end runtime trace proving terminalization after policy firing
+
+Decision:
+- `WS-PD` tranche is **closed**
+- no `WS-PD` carry-forwards remain open
+- the next process step is no longer another `WS-PD` live rerun by default; it is selecting the next slice above this harness layer
+
+Next process step:
+- choose the next post-`WS-PD` slice
+- likely candidates now documented in this spec:
+  - Zenith-inspired harness layer (`WS-Z1` onward)
+  - or another explicitly mapped post-turn autonomy control slice if Zenith review changes the order
+
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
 Why this slice exists:
@@ -8110,7 +8137,5 @@ No new carry-forwards.
 
 Next process step:
 - `STEWARD2 ADVANCE LM-C`
-
-
 
 
