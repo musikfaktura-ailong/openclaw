@@ -7155,6 +7155,11 @@ For every autonomy seed decision:
   - `steward_goal_gaps`
   - `autonomy.gap.recorded` events
 
+Clarification:
+- `WS-Z1` governs unresolved-gap reopening only
+- principled `no remaining semantic gap -> stop` ownership is explicitly deferred to `WS-Z5`
+- `WS-Z1` may name and persist unresolved gaps, but it is not the slice that decides the final closed-goal stopping contract
+
 #### Target modules
 
 - `src/steward/autonomy/goal-gap-registry.ts`
@@ -7186,6 +7191,8 @@ This slice delivers:
 - full milestone/tester orchestration from later Zenith slices
 - new runtime execution behavior
 - replacing `WS-PD`, proof judge, or task-value logic
+- closed-goal stopping / `goal_closed` emission when no unresolved semantic gap remains
+  - that responsibility belongs to `WS-Z5 — stopping and replanning controller`
 
 #### Implementation record
 
@@ -7258,14 +7265,19 @@ Review gate record (2026-05-08, Claude):
   - classifier derives from registry seam only: `work-classifier.ts` is now 31 lines with zero logic — delegates entirely to `recordCurrentAutonomyGoalGap`. No parallel heuristic path. ✓
   - WS-PD not weakened: `goal-gap-registry.ts` imports and reuses `resolveAutonomyWorkClassBoundary` — does not duplicate it. User-turn path unaffected; `resolveActiveAutonomyContext` still gates all progress-discipline decisions on `triggerSource`. ✓
 - structural carry-forward — must be resolved before advancement:
-  - AC-1 and AC-5 from the WS-Z1 spec acceptance conditions are not implemented: when `proof_verdict = accepted` and no semantic gaps remain, the host must emit a stop signal (gap kind `goal_closed` or equivalent) persisted in DB and suppress further reseeding of `goal_work`. The implementation falls through silently to `maintenance_work` — no stop path, no closure record, no regression test for this path.
-  - Resolution: Codex chooses one of two options before advancement:
-    - Option A: implement the closed-goal stop path in `goal-gap-registry.ts` with a new gap kind, a DB row, and a focused test.
-    - Option B: descope AC-1/AC-5 to WS-Z5 (stopping controller) with a spec update removing the stop-signal requirement from WS-Z1 acceptance conditions — scoping it there is defensible since stopping discipline is WS-Z5's defined responsibility.
-  - until one option is chosen and committed, WS-Z1 advancement gate is blocked on this carry-forward.
+  - reviewer correctly identified that principled closed-goal stopping does not belong inside a gap-registry slice
+  - Resolution chosen: **Option B**
+    - closed-goal stop signaling is descoped from `WS-Z1`
+    - responsibility moves explicitly to `WS-Z5 — stopping and replanning controller`
+    - `WS-Z1` remains responsible only for unresolved-gap recording and transition
+  - after this spec correction, `WS-Z1` no longer carries a hidden stop-controller obligation
 
 Current carry-forwards:
-- AC-1/AC-5 stop-signal gap: closed-goal suppression not implemented; Codex must choose Option A (implement) or Option B (descope to WS-Z5) before advancement.
+- none
+
+Deferred to `WS-Z5`:
+- host-owned `goal_closed` / stop-signal emission when proof is accepted and no semantic gap remains
+- suppression of further autonomy reseeding based on that explicit closed-goal stop state
 
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
