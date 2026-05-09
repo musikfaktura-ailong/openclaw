@@ -104,6 +104,16 @@ export function resolveAutonomySeedPlan(params: {
   switch (params.workClass) {
     case "goal_work":
       return buildGoalWorkPlan(params.sessionId, now);
+    case "tester_work":
+      return {
+        flowType: "control",
+        role: "diagnostic",
+        title: "Autonomy: independently test accepted worker proof",
+        details:
+          "Seed one bounded tester task that tries to invalidate the latest accepted worker proof before the governing gap may move toward resolved.",
+        phase: "test",
+        goalKind: params.classificationReason,
+      };
     case "diagnostic_work":
       return {
         flowType: "control",

@@ -166,4 +166,79 @@ describe("WS-Z1 goal gap registry", () => {
       status: "open",
     });
   });
+
+  it("keeps the gap open as goal_work with tester challenge evidence after a challenged tester verdict", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:z2-challenge-gap", 4_000);
+    recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 4_010,
+    });
+    getDb()
+      .prepare(
+        `UPDATE steward_goal_gaps
+         SET status = 'resolved', updated_ts = ?
+         WHERE session_id = ?`,
+      )
+      .run(4_020, authority.sessionId);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES (?, ?, ?, ?, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap', 'Details', ?, ?, ?)`,
+      )
+      .run(
+        2,
+        authority.sessionId,
+        null,
+        null,
+        JSON.stringify({
+          priorGapId: 1,
+          workerProofId: 201,
+          workerTaskId: 51,
+          workerFlowId: 51,
+        }),
+        4_030,
+        4_030,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, NULL, ?, NULL, 'general', 'Worker proof', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)`,
+      )
+      .run(201, authority.sessionId, 4_031, 4_031);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, NULL, ?, NULL, 'general', 'Tester proof', 'tester challenge', '', 'rejected', 0, 'ungrounded', 1, 'challenge', NULL, ?, ?, ?)`,
+      )
+      .run(301, authority.sessionId, "tester found contradiction", 4_032, 4_032);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_tester_verdicts (
+           id, session_id, gap_id, worker_proof_id, tester_proof_id, verdict, challenge_summary, created_ts, updated_ts
+         ) VALUES (?, ?, ?, ?, ?, 'challenged', ?, ?, ?)`,
+      )
+      .run(1, authority.sessionId, 2, 201, 301, "tester found contradiction", 4_040, 4_040);
+
+    const gap = recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 4_100,
+    });
+
+    expect(gap).toMatchObject({
+      gapKind: "tester_challenged_worker_proof",
+      workClass: "goal_work",
+      reason: "tester_challenged_worker_proof",
+      status: "open",
+    });
+    expect(gap.evidence).toMatchObject({
+      workerProofId: 201,
+      testerProofId: 301,
+      challengeSummary: "tester found contradiction",
+    });
+  });
 });

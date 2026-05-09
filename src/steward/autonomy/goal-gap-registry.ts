@@ -1,9 +1,11 @@
 import { getDb } from "../db/db-bootstrap.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
 import { resolveAutonomyWorkClassBoundary } from "./progress-discipline.js";
+import { recordLatestTesterVerdict, resolveTesterGapRequirement } from "./tester-policy.js";
 
 export type AutonomyGapWorkClass =
   | "goal_work"
+  | "tester_work"
   | "diagnostic_work"
   | "maintenance_work"
   | "review_or_consolidation";
@@ -103,6 +105,34 @@ function applyBoundary(params: {
 }
 
 function proposeCurrentGap(params: { sessionId: string; now: number }): ProposedGap {
+  const testerRequirement = resolveTesterGapRequirement(params);
+  if (testerRequirement) {
+    if (testerRequirement.kind === "tester_required") {
+      return {
+        gapKind: testerRequirement.reason,
+        workClass: testerRequirement.workClass,
+        reason: testerRequirement.reason,
+        title: "Autonomy gap: independent tester required",
+        details:
+          "A goal-work proof was accepted, but the host requires one independent tester turn before the governing gap can move toward resolved.",
+        sourceFlowId: testerRequirement.workerFlowId,
+        sourceHostTaskId: testerRequirement.workerTaskId,
+        evidence: testerRequirement.evidence,
+      };
+    }
+    return {
+      gapKind: testerRequirement.reason,
+      workClass: testerRequirement.workClass,
+      reason: testerRequirement.reason,
+      title: "Autonomy gap: tester challenged worker proof",
+      details:
+        "The independent tester challenged the previous worker proof. The next host-owned action must reopen bounded goal work with the tester challenge evidence attached.",
+      sourceFlowId: null,
+      sourceHostTaskId: null,
+      evidence: testerRequirement.evidence,
+    };
+  }
+
   const activeBlockers = countRows(
     `SELECT COUNT(*) AS count
      FROM steward_blockers b
@@ -266,6 +296,10 @@ export function recordCurrentAutonomyGoalGap(params: {
   now?: number;
 }): RecordedAutonomyGoalGap {
   const now = params.now ?? Date.now();
+  recordLatestTesterVerdict({
+    sessionId: params.sessionId,
+    now,
+  });
   const proposed = proposeCurrentGap({
     sessionId: params.sessionId,
     now,

@@ -59,6 +59,9 @@ export async function seedIdleAutonomyTask(params: {
   sessionKey: string;
   workClass: AutonomyWorkClass;
   classificationReason: string;
+  gapId?: number | null;
+  gapKind?: string | null;
+  gapEvidence?: Record<string, unknown> | null;
   artifactRoot?: string;
   now?: number;
 }): Promise<IdleSeedDecision> {
@@ -94,6 +97,9 @@ export async function seedIdleAutonomyTask(params: {
       seeded_by: "autonomy",
       autonomy_work_class: params.workClass,
       classification_reason: params.classificationReason,
+      gap_id: params.gapId ?? null,
+      gap_kind: params.gapKind ?? null,
+      gap_evidence: params.gapEvidence ?? null,
       title: plan.title,
       details: plan.details,
       host_task_id: null,
@@ -132,6 +138,9 @@ export async function seedIdleAutonomyTask(params: {
       seeded_by: "autonomy",
       autonomy_work_class: params.workClass,
       classification_reason: params.classificationReason,
+      gap_id: params.gapId ?? null,
+      gap_kind: params.gapKind ?? null,
+      gap_evidence: params.gapEvidence ?? null,
       title: plan.title,
       details: plan.details,
       host_task_id: hostTask.taskId,
@@ -167,6 +176,8 @@ export async function seedIdleAutonomyTask(params: {
       taskId,
       workClass: params.workClass,
       classificationReason: params.classificationReason,
+      gapId: params.gapId ?? null,
+      gapKind: params.gapKind ?? null,
       flowType: plan.flowType,
       role: plan.role,
       details: plan.details,

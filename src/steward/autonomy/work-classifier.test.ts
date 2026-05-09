@@ -71,6 +71,52 @@ describe("WS-IC work classifier", () => {
     });
   });
 
+  it("classifies tester work after an accepted goal-work proof with no tester verdict yet", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-tester", 1_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES (?, ?, NULL, NULL, 'no_recorded_proof_yet', 'goal_work', 'no_recorded_proof_yet', 'open', 'Gap', 'Details', '{}', ?, ?)`,
+      )
+      .run(1, authority.sessionId, 1_010, 1_010);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_flows (
+           id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, ?, 'research', 'completed', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        11,
+        authority.sessionId,
+        JSON.stringify({ seeded_by: "autonomy", autonomy_work_class: "goal_work", host_task_id: 11 }),
+        process.pid,
+        1_020,
+        1_020,
+        1_020,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_host_tasks (
+           id, session_id, source, status, seed_flow_id, work_class, title, details, created_ts, updated_ts, completed_at
+         ) VALUES (?, ?, 'autonomy', 'done', ?, 'goal_work', 'Goal Task', 'Details', ?, ?, ?)`,
+      )
+      .run(11, authority.sessionId, 11, 1_020, 1_020, 1_020);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, ?, ?, ?, 'general', 'Goal Task', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)`,
+      )
+      .run(100, 11, authority.sessionId, 11, 1_030, 1_030);
+
+    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+      workClass: "tester_work",
+      reason: "tester_required_after_accepted_proof",
+    });
+  });
+
   it("classifies diagnostic work after consecutive failed primary tasks", () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-frustration", 1_000);
     const db = getDb();

@@ -254,4 +254,74 @@ describe("WS-IC autonomy runner", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("seeds tester_work after an accepted goal-work proof", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "steward2-runner-tester-"));
+    try {
+      const sessionKey = "agent:main:webchat:direct:auto-tester";
+      const authority = getOrCreateStewardSession(sessionKey, 3_000);
+      setAutonomyMode({ mode: "assistant_plus_autonomy", now: 3_050 });
+      markAutonomyBootCompleted({ completed: true, now: 3_100 });
+      getDb()
+        .prepare(
+          `INSERT INTO steward_goal_gaps (
+             id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+           ) VALUES (?, ?, NULL, NULL, 'no_recorded_proof_yet', 'goal_work', 'no_recorded_proof_yet', 'open', 'Gap', 'Details', '{}', ?, ?)`,
+        )
+        .run(1, authority.sessionId, 3_110, 3_110);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_flows (
+             id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+           ) VALUES (?, ?, 'research', 'completed', ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          51,
+          authority.sessionId,
+          JSON.stringify({ seeded_by: "autonomy", autonomy_work_class: "goal_work", host_task_id: 51 }),
+          process.pid,
+          3_120,
+          3_120,
+          3_120,
+        );
+      getDb()
+        .prepare(
+          `INSERT INTO steward_host_tasks (
+             id, session_id, source, status, seed_flow_id, work_class, title, details, created_ts, updated_ts, completed_at
+           ) VALUES (?, ?, 'autonomy', 'done', ?, 'goal_work', 'Goal Task', 'Details', ?, ?, ?)`,
+        )
+        .run(51, authority.sessionId, 51, 3_120, 3_120, 3_120);
+      getDb()
+        .prepare(
+          `INSERT INTO steward_proofs (
+             id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+             verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+           ) VALUES (?, ?, ?, ?, 'general', 'Goal Task', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)`,
+        )
+        .run(201, 51, authority.sessionId, 51, 3_130, 3_130);
+
+      const result = await runAutonomyTick({
+        sessionKey,
+        artifactRoot: tempRoot,
+        now: 3_200,
+      });
+      const seededEvent = getDb()
+        .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.task.seeded' ORDER BY id DESC LIMIT 1`)
+        .get() as { data_json: string };
+      const latestFlow = getDb()
+        .prepare(`SELECT state_json FROM steward_flows WHERE session_id = ? ORDER BY id DESC LIMIT 1`)
+        .get(authority.sessionId) as { state_json: string };
+
+      expect(result).toMatchObject({
+        status: "seeded",
+        workClass: "tester_work",
+        reason: "tester_required_after_accepted_proof",
+      });
+      expect(seededEvent.data_json).toContain("\"workClass\":\"tester_work\"");
+      expect(latestFlow.state_json).toContain("\"gap_kind\":\"tester_required_after_accepted_proof\"");
+      expect(latestFlow.state_json).toContain("\"workerProofId\":201");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

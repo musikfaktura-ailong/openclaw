@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **WS-Z1 advanced (2026-05-08). Gap recording and class derivation are the governing seam for autonomy seeding. WS-Z2 (independent tester work class) is open for spec analysis. Closed-goal stopping deferred to WS-Z5.**
+Current phase: **`WS-Z2` implemented on `ws-z2` (2026-05-08). Steward2 now has a host-owned independent tester lane for accepted `goal_work` proofs: the next autonomy tick seeds `tester_work`, tester verdicts persist in `steward_tester_verdicts`, challenged verdicts reopen `goal_work` with challenge evidence, and gap progress can no longer rely on worker self-report alone. Next step: reviewer gate for `WS-Z2`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -56,8 +56,8 @@ Current decision:
 - `Steward2` is OpenClaw-first, not PEQS-first
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
-- deployment testing has advanced past the autonomy identity boundary; the next real live question is how the harness reopens named gaps after each completed autonomy turn
-- the next spec step is reviewer validation for `WS-Z1`
+- deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
+- the next spec step is reviewer validation for `WS-Z2`
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -579,7 +579,7 @@ This board is the single glanceable source of implementation readiness.
 | F | Tool supervisor | `advance-ready` | `yes` | depends on `A`; no local blocker beyond upstream readiness |
 | G | Relationship memory / knowledge store | `advance-ready` | `yes` | resolved: `BD-3`; reviewed: PASS; advancement gate approved |
 | H | Maintenance governor / metacog monitor | `implement` | `yes` | depends on `A`, `E`, `G` — all `advance-ready`; opened for implementation 2026-04-24 |
-| PD | Autonomy progress discipline | `confirm` | `yes` | confirmed 2026-05-08; all 5 AC satisfied; ready for advancement gate |
+| PD | Autonomy progress discipline | `advance-ready` | `yes` | advanced 2026-05-08; merged PR #30; carry-forwards none |
 | Z1 | Autonomy goal-gap registry | `advance-ready` | `yes` | advanced 2026-05-08; AC-1/AC-5 stop-signal descoped to WS-Z5; gap recording + class derivation complete |
 | Z2 | Independent tester work class | `analyze` | `no` | depends on Z1 advance-ready (done); needs full spec before implement |
 
@@ -7103,6 +7103,11 @@ Review gate record (2026-05-08, Claude):
 - focused verification evidence: 4 focused unit tests in `progress-discipline.test.ts`; 2 focused integration tests in `autonomy-executor.test.ts` (ws-pd-hard-fail, ws-pd-permission); 1 class-boundary integration test in `autonomy-runner.test.ts`; 27 tests across 4 files PASS; TypeScript clean.
 - non-structural note: unreachable `return null` after the try/catch in `pickAgentRegistryLmstudioAutonomyModel` (autonomy-executor.ts:243) — dead code, does not affect the WS-PD invariant, can be cleaned up opportunistically.
 
+Advancement gate record (2026-05-08, Claude):
+- verdict: ADVANCE
+- all advancement gate conditions met: 27 tests PASS, TypeScript clean, reviewer confirmed invariant, spec handoff matches implementation
+- status board: WS-PD → `advance-ready`
+
 Current carry-forwards:
 - none
 
@@ -7291,7 +7296,197 @@ Advancement gate record (2026-05-08, Claude):
   - reviewer confirmed gap registry is the governing seam for post-turn requirement reopening ✓
   - spec handoff matches implemented module ownership ✓
 - status board: WS-Z1 → `advance-ready`
-- next: WS-Z2 (independent tester work class) requires full spec before implementation; add to status board as `analyze`
+- next: WS-Z2 (independent tester work class) — full spec written below; status board updated to `implement`
+
+---
+
+### WS-Z2 — independent tester work class (2026-05-08)
+
+Why this slice exists:
+- WS-Z1 made each autonomy seed decision come from a persisted gap record
+- the remaining gap in the Zenith harness mapping is that worker success is self-reported: the executor runs a turn, proof-judge evaluates it, but there is no separate tester that tries to invalidate the worker result before the gap is resolved
+- Zenith's core lesson: "the milestone is not done when the worker reports done; it is done only after a separate attempt to invalidate the milestone fails"
+- without an independent tester, a `goal_work` turn can accept its own output and close the gap with no external verification — the same failure mode as Plan-RALPH's false done labels
+- this slice adds a host-owned tester work class that is seeded after a `goal_work` turn produces an accepted proof, before the gap can be marked resolved
+
+Implementer: Codex
+
+Reviewer: Claude
+
+#### Intended invariant
+
+After a `goal_work` autonomy turn produces a proof verdict of `accepted`:
+- the host must seed exactly one `tester_work` autonomy turn before the governing gap can transition to resolved
+- the tester turn must try to falsify the worker result using the same persisted evidence (proof text, artifact path, history summary)
+- the tester turn verdict is recorded as a `steward_tester_verdicts` row and an `autonomy.tester.verdict` event
+- only if the tester returns `confirmed` may the governing gap advance toward resolved
+- if the tester returns `challenged`, the gap stays open and the host seeds a new `goal_work` turn with the challenge evidence attached
+- user-turn behavior must remain completely unaffected
+
+#### Target OpenClaw seam
+
+- OpenClaw continues to own in-turn execution; this slice does not touch the execution path
+- Steward owns the tester seeding decision and verdict recording:
+  - tester seeding is a host-side decision after `runtime.idle` with `proofVerdict = accepted`
+  - tester turn runs through the same `runAutonomyTick` → `autonomy-executor.ts` path as any other autonomy turn
+  - the work class is `tester_work`; OpenClaw sees it as an ordinary autonomy turn
+
+#### Donor references
+
+- `C:\ai_agent\zenith\technical_report\from_ralph_to_zenith_brand.tex` — independent tester role (Section 3.4 Milestone-RALPH), Zenith tester-per-milestone assignment (Section 3.5)
+- PEQS donor lesson:
+  - old PEQS had no independent tester lane; proof-judge was post-hoc and passive
+  - Steward2 needs an active tester that runs before gap resolution, not after metric observation
+
+#### Steward2 target modules
+
+New modules:
+- `src/steward/autonomy/tester-policy.ts` — decides when to seed a tester turn, records tester verdict, attaches challenge evidence to next gap
+- `src/steward/autonomy/tester-policy.test.ts` — unit tests for tester seeding decision and verdict recording
+
+Modified modules:
+- `src/steward/autonomy/autonomy-runner.ts` — seed path now carries persisted gap metadata so tester work is bound to the exact worker proof/gap pair
+- `src/steward/autonomy/goal-gap-registry.ts` — records tester verdicts before gap proposal; reopens `goal_work` with challenge evidence and routes accepted worker proofs into a `tester_work` gap
+- `src/steward/autonomy/goal-orchestrator.ts` — adds a steward-owned seed plan for `tester_work`
+- `src/steward/autonomy/idle-seeding.ts` — persists `gap_id`, `gap_kind`, and `gap_evidence` into seeded autonomy flow state
+- `src/steward/autonomy/work-classifier.ts` — add `tester_work` to `AutonomyWorkClass` union; return it when tester policy requires a tester turn
+- `src/steward/autonomy/work-classifier.test.ts`
+- `src/steward/autonomy/autonomy-runner.test.ts`
+- `src/steward/autonomy/goal-gap-registry.test.ts`
+- `src/steward/db/runtime-schema.ts` — register `tester_work` work class, `autonomy.tester.verdict` event kind, `StewardTesterVerdictRow` type
+- `src/steward/db/migrations/0008_tester_verdicts.sql` — create `steward_tester_verdicts` table
+
+No new OpenClaw seam files. This slice is entirely within steward-owned modules.
+
+#### Implementation record
+
+Delivered locally on `ws-z2`:
+- added `src/steward/autonomy/tester-policy.ts`
+  - resolves whether the next autonomy gap is:
+    - `tester_required_after_accepted_proof`
+    - or `tester_challenged_worker_proof`
+  - records `steward_tester_verdicts` from completed `tester_work` turns using persisted flow-state evidence
+  - emits `autonomy.tester.verdict`
+- added `src/steward/autonomy/tester-policy.test.ts`
+  - accepted goal-work proof requires `tester_work`
+  - challenged tester run persists a verdict row and event
+- added migration `src/steward/db/migrations/0008_tester_verdicts.sql`
+  - creates `steward_tester_verdicts`
+  - indexes by `tester_proof_id`, `gap_id`, and `worker_proof_id`
+- updated `src/steward/autonomy/goal-gap-registry.ts`
+  - imports tester policy
+  - records latest tester verdict before proposing the next gap
+  - converts accepted worker proof into a `tester_work` gap
+  - converts challenged tester verdict into a new `goal_work` gap with `challengeSummary` in evidence
+- updated `src/steward/autonomy/work-classifier.ts`
+  - adds `tester_work`
+  - returns persisted gap evidence together with `gapId` / `gapKind`
+- updated `src/steward/autonomy/idle-seeding.ts`
+  - persists `gap_id`, `gap_kind`, and `gap_evidence` into seeded flow state and `autonomy.task.seeded`
+- updated `src/steward/autonomy/goal-orchestrator.ts`
+  - adds the bounded tester seed plan
+- updated tests:
+  - `autonomy-runner.test.ts` now proves `goal_work` accepted proof -> `tester_work` seeded
+  - `goal-gap-registry.test.ts` now proves tester challenge reopens `goal_work` with challenge evidence
+  - `work-classifier.test.ts` now proves accepted goal proof classifies to `tester_work`
+  - `ws-a.integration.test.ts` now expects schema version `8`
+
+#### Dependency list
+
+- WS-Z1 advance-ready: goal-gap registry and `recordCurrentAutonomyGoalGap` already on `ws-z1`
+- existing `steward_proofs`, proof verdict events, and `autonomy.gap.recorded` events already persisted — tester policy reads from these
+- existing `runAutonomyTick` tick path in `autonomy-runner.ts`
+
+#### Host-owned decisions for this slice
+
+1. Tester seeding trigger
+   - tester is seeded when: last completed autonomy turn had `work_class = goal_work` AND `proof_verdict = accepted` AND no `steward_tester_verdicts` row exists for that proof/gap combination yet
+   - tester is not seeded for `maintenance_work`, `diagnostic_work`, or `review_or_consolidation` turns
+
+2. Tester verdict ownership
+   - tester turn produces a proof (the proof-judge evaluates it as usual)
+   - tester policy interprets that proof as a tester verdict: `confirmed` if proof accepted, `challenged` if proof rejected
+   - the tester verdict row stores: gap_id, worker_proof_id, tester_proof_id, verdict, challenge_summary
+
+3. Gap resolution gate
+   - a gap may only move to `resolved` if its latest tester verdict is `confirmed`
+   - if verdict is `challenged`, the gap stays `open` and `challenge_summary` is attached to the next gap record's evidence
+
+4. Tester seeding suppression
+   - if a `tester_work` turn is already running or resumable for this session, do not seed another
+   - duplicate suppression follows the same pattern as existing `goal_work` duplicate suppression in `autonomy-runner.ts`
+
+#### Scope
+
+This slice delivers:
+- `steward_tester_verdicts` table and migration
+- `tester-policy.ts` seeding and verdict recording logic
+- tester verdict gate in gap resolution
+- `tester_work` work class in the classifier
+- regression tests confirming tester seeding and challenge flow
+
+#### Out of scope
+
+- full milestone registry (WS-Z3)
+- reusable skill capture (WS-Z4)
+- stopping controller (WS-Z5)
+- changing the proof-judge or task-value modules
+- spawning multiple parallel testers
+
+#### Acceptance evidence
+
+Advance only if all of the following are true:
+1. After a `goal_work` turn with `proof_verdict = accepted`, the next autonomy tick seeds a `tester_work` turn, not another `goal_work` turn.
+2. A `steward_tester_verdicts` row is written after the tester turn completes, queryable from cold process.
+3. A tester verdict of `challenged` keeps the gap open and attaches challenge evidence to the next gap record's evidence JSON.
+4. A tester verdict of `confirmed` allows the gap to proceed toward resolved.
+5. User-turn path is unaffected; `tester_work` seeding only fires on autonomy ticks.
+
+#### Required verification
+
+- focused unit tests: tester seeding decision, verdict recording, challenge attachment, suppression of duplicate tester
+- focused integration test: `goal_work` proof accepted → tick → `tester_work` seeded; directly inspect `steward_tester_verdicts` row
+- focused integration test: tester challenges worker → gap stays open with challenge evidence in evidence JSON
+- existing `autonomy-runner.test.ts`, `goal-gap-registry.test.ts`, `work-classifier.test.ts` suites still pass
+- TypeScript clean
+
+#### Local verification
+
+- `corepack pnpm exec vitest run src/steward/autonomy/tester-policy.test.ts src/steward/autonomy/goal-gap-registry.test.ts src/steward/autonomy/work-classifier.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+  - PASS: `5` files, `21` tests
+  - note: required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+
+#### Implementer delivery rule
+
+Codex must deliver:
+- exact invariant implemented in steward-owned modules
+- updated `STEWARD2_SPEC.md` handoff
+- focused verification results with DB row values shown
+- no advancement language in the implementation handoff
+
+#### Reviewer gate
+
+PASS only if the reviewer can confirm:
+- tester seeding is host-owned and fires only after `goal_work` accepted proof, not on other work classes
+- tester verdict is persisted in `steward_tester_verdicts` and queryable without in-memory state
+- challenged verdict keeps gap open and attaches evidence — gap cannot self-close on worker self-report alone
+- user-turn path unaffected
+- no new OpenClaw seam files modified
+
+#### Advancement gate
+
+Advance only after:
+- focused tests pass
+- TypeScript clean
+- reviewer confirms no gap can resolve without a tester verdict
+- `STEWARD2_SPEC.md` handoff received and matches implemented modules
+
+Current carry-forwards:
+- none
+
+---
 
 ### WS-M — autonomy execution reliability and chronology truth (2026-05-06)
 
