@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z2` implemented on `ws-z2` (2026-05-08). Steward2 now has a host-owned independent tester lane for accepted `goal_work` proofs: the next autonomy tick seeds `tester_work`, tester verdicts persist in `steward_tester_verdicts`, challenged verdicts reopen `goal_work` with challenge evidence, and gap progress can no longer rely on worker self-report alone. Next step: reviewer gate for `WS-Z2`.**
+Current phase: **`WS-Z2` reviewed PASS on `ws-z2` (2026-05-09). All 6 reviewer gate conditions confirmed. Tester seeding is host-owned and fires only after `goal_work` accepted proof. Verdict persists in `steward_tester_verdicts` cold-restart safe. Challenged verdict keeps gap open with evidence attached. No gap can self-close on worker self-report alone. 21/21 tests pass. Next step: advance WS-Z2.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is reviewer validation for `WS-Z2`
+- the next spec step is advancement for `WS-Z2`
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -581,7 +581,7 @@ This board is the single glanceable source of implementation readiness.
 | H | Maintenance governor / metacog monitor | `implement` | `yes` | depends on `A`, `E`, `G` — all `advance-ready`; opened for implementation 2026-04-24 |
 | PD | Autonomy progress discipline | `advance-ready` | `yes` | advanced 2026-05-08; merged PR #30; carry-forwards none |
 | Z1 | Autonomy goal-gap registry | `advance-ready` | `yes` | advanced 2026-05-08; AC-1/AC-5 stop-signal descoped to WS-Z5; gap recording + class derivation complete |
-| Z2 | Independent tester work class | `analyze` | `no` | depends on Z1 advance-ready (done); needs full spec before implement |
+| Z2 | Independent tester work class | `advance-ready` | `yes` | reviewed PASS 2026-05-09; 6/6 gate conditions confirmed; 21/21 tests pass; no carry-forwards |
 
 Interpretation:
 - `Current state` must be one of `analyze`, `implement`, `confirm`, or `advance-ready`
@@ -7485,6 +7485,37 @@ Advance only after:
 
 Current carry-forwards:
 - none
+
+#### Review gate record (2026-05-09)
+
+Reviewer: Claude
+Branch: ws-z2
+Commit: 059e4a0ee8
+Tests: 21/21 pass (5 files: tester-policy, goal-gap-registry, work-classifier, autonomy-runner, ws-a integration)
+
+Gate condition checks:
+
+**G1 — Tester seeding is host-owned and fires only after `goal_work` accepted proof:** PASS
+`resolveTesterGapRequirement` in `tester-policy.ts` queries `steward_proofs JOIN steward_host_tasks` filtering `ht.work_class = 'goal_work' AND p.verdict = 'accepted'`. Returns `tester_required` only if an accepted goal-work proof exists AND no `steward_tester_verdicts` row exists for that proof yet. The `challenged` re-open path also only fires on existing challenged verdict with no newer accepted goal proof. No other work class triggers tester seeding.
+
+**G2 — Tester verdict persisted in `steward_tester_verdicts`, queryable without in-memory state:** PASS
+`recordLatestTesterVerdict` writes a full row (gap_id, worker_proof_id, tester_proof_id, verdict, challenge_summary) recovered entirely from `steward_flows.state_json.gap_evidence` — persisted at seed time in `idle-seeding.ts`. All reads are fresh SQL queries. Unique index on `tester_proof_id` prevents duplicate recording. FK constraints to `steward_sessions`, `steward_goal_gaps`, `steward_proofs` all present. Cold-restart safe.
+
+**G3 — Challenged verdict keeps gap open with evidence; gap cannot self-close on worker self-report alone:** PASS
+`proposeCurrentGap` calls `resolveTesterGapRequirement` as its first check, before any other condition. If the latest tester verdict is `challenged` and no newer accepted goal proof has been produced, it returns `tester_challenged_worker_proof` with `workClass: "goal_work"` and `challengeSummary` in evidence. The upsert in `recordCurrentAutonomyGoalGap` resolves the prior tester_work gap and opens a new goal_work gap with the challenge evidence attached. Worker self-report alone cannot close the gap — the tester gate must clear first.
+
+**G4 — Confirmed verdict allows gap to proceed toward resolved:** PASS
+When tester verdict is `confirmed`, `existingVerdict` is found for that proof → `resolveTesterGapRequirement` returns `null` → `proposeCurrentGap` falls through to the regular condition chain. The UPDATE in `recordCurrentAutonomyGoalGap` resolves the open `tester_work` gap (gap_kind/work_class/reason no longer matches) and a new gap is proposed. Confirmed verdict unblocks progress correctly via the WS-Z1 upsert pattern.
+
+**G5 — User-turn path unaffected:** PASS
+All new logic is in `src/steward/autonomy/`. Entry point is `runAutonomyTick` → `classifyAutonomyWork` → `recordCurrentAutonomyGoalGap`. No user-turn code paths are modified. `tester_work` seeding only fires on autonomy ticks.
+
+**G6 — No new OpenClaw seam files modified:** PASS
+Changed files: `tester-policy.ts`, `tester-policy.test.ts`, `goal-gap-registry.ts`, `work-classifier.ts`, `idle-seeding.ts`, `goal-orchestrator.ts`, `autonomy-runner.ts`, migration, `runtime-schema.ts`, test files. All steward-owned. No OpenClaw seam files touched.
+
+One structural observation (no carry-forward): AC-4 gap resolution is implicit — the `tester_work` gap resolves when `proposeCurrentGap` returns a different gap_kind and the UPDATE fires. This is the correct WS-Z1 upsert pattern, not a missing step. No carry-forwards required.
+
+Verdict: **PASS**
 
 ---
 
