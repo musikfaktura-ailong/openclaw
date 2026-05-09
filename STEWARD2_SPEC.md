@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z2` merged to `main` via PR #31 (2026-05-09). Post-merge reconciliation complete. `WS-Z3` spec written: sealed milestone recording — after a tester-confirmed `goal_work` proof, the host persists a `steward_milestones` row (status `sealed`) linking gap_id and verdict_id. This gives Z5 a canonical milestone completion count and prevents the host from treating self-reported proof acceptance as a genuine milestone. Next step: implement WS-Z3.**
+Current phase: **`WS-Z3` implemented on `ws-z3` (2026-05-09). Milestone sealing is now a host-owned gap-registry transition: a confirmed tester verdict seals exactly one `steward_milestones` row, challenged verdicts seal none, and sealed milestone count is queryable from cold process and attached to future gap evidence. Focused `WS-Z3` suites plus existing autonomy suites pass locally. Next step: review WS-Z3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is implementation of `WS-Z3` (sealed milestone recording)
+- the next spec step is review for `WS-Z3` (sealed milestone recording)
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7111,6 +7111,51 @@ Advancement gate record (2026-05-08, Claude):
 
 Current carry-forwards:
 - none
+
+#### Implementation record
+
+Implemented on branch `ws-z3`.
+
+Delivered:
+- `src/steward/autonomy/milestone-registry.ts`
+- `src/steward/autonomy/milestone-registry.test.ts`
+- `src/steward/db/migrations/0009_milestones.sql`
+
+Updated:
+- `src/steward/autonomy/goal-gap-registry.ts`
+- `src/steward/autonomy/goal-gap-registry.test.ts`
+- `src/steward/db/runtime-schema.ts`
+- `src/steward/runtime/ws-a.integration.test.ts`
+- `STEWARD2_SPEC.md`
+
+Behavior now:
+- `recordCurrentAutonomyGoalGap` is a single DB transaction across tester-verdict flush, milestone sealing, and gap update
+- a confirmed tester verdict seals exactly one `steward_milestones` row with unique `verdict_id`
+- a challenged tester verdict seals no milestone
+- `sealedMilestoneCount` is attached to future gap evidence from cold-process DB state
+
+#### Local verification
+
+- `corepack pnpm exec vitest run src/steward/autonomy/milestone-registry.test.ts src/steward/autonomy/goal-gap-registry.test.ts src/steward/autonomy/tester-policy.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+
+Verification result:
+- focused suite PASS: `5 files, 19 tests`
+- TypeScript PASS
+
+Observed DB evidence from focused tests:
+- sealed milestone row:
+  - `gap_id = 1`
+  - `verdict_id = 10`
+  - `milestone_kind = 'goal_gap_confirmed'`
+  - `status = 'sealed'`
+- challenged verdict path:
+  - `SELECT COUNT(*) FROM steward_milestones WHERE session_id = ?` stays `0`
+- sequential confirmed cycles:
+  - `countSealedMilestones(sessionId)` returns `0 -> 1 -> 2`
+- emitted event:
+  - `autonomy.milestone.sealed`
+  - `data_json` includes `verdictId`, `gapId`, `milestoneKind`, `sessionId`
 
 ## WS-PD post-merge reconciliation (2026-05-08)
 

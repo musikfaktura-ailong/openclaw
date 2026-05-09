@@ -241,4 +241,121 @@ describe("WS-Z1 goal gap registry", () => {
       challengeSummary: "tester found contradiction",
     });
   });
+
+  it("seals a milestone row after a confirmed tester verdict and exposes the sealed count in gap evidence", () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:z3-confirmed-gap", 5_000);
+    recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 5_010,
+    });
+    getDb()
+      .prepare(
+        `UPDATE steward_goal_gaps
+         SET status = 'resolved', updated_ts = ?
+         WHERE session_id = ?`,
+      )
+      .run(5_020, authority.sessionId);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES (?, ?, ?, ?, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap', 'Details', ?, ?, ?)`,
+      )
+      .run(
+        2,
+        authority.sessionId,
+        null,
+        null,
+        JSON.stringify({
+          priorGapId: 1,
+          workerProofId: 401,
+          workerTaskId: 61,
+          workerFlowId: 61,
+        }),
+        5_030,
+        5_030,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, NULL, ?, NULL, 'general', 'Worker Task', 'worker proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)` ,
+      )
+      .run(401, authority.sessionId, 5_035, 5_035);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_flows (
+           id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, ?, 'control', 'completed', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        62,
+        authority.sessionId,
+        JSON.stringify({
+          seeded_by: "autonomy",
+          autonomy_work_class: "tester_work",
+          gap_evidence: {
+            priorGapId: 2,
+            workerProofId: 401,
+            workerTaskId: 61,
+            workerFlowId: 61,
+          },
+        }),
+        process.pid,
+        5_040,
+        5_040,
+        5_040,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_host_tasks (
+           id, session_id, source, status, seed_flow_id, work_class, title, details, created_ts, updated_ts, completed_at
+         ) VALUES (?, ?, 'autonomy', 'done', ?, 'tester_work', 'Tester Task', 'Details', ?, ?, ?)`,
+      )
+      .run(62, authority.sessionId, 62, 5_040, 5_040, 5_040);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, ?, ?, ?, 'general', 'Tester Task', 'tester confirm', '', 'accepted', 1, '', 1, 'confirmed', ?, NULL, '', ?)` ,
+      )
+      .run(402, 62, authority.sessionId, 62, 5_050, 5_050);
+
+    const gap = recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 5_100,
+    });
+
+    const milestone = getDb()
+      .prepare(
+        `SELECT gap_id, verdict_id, status
+         FROM steward_milestones
+         WHERE session_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(authority.sessionId) as { gap_id: number; verdict_id: number; status: string };
+    const event = getDb()
+      .prepare(
+        `SELECT data_json
+         FROM steward_events
+         WHERE session_id = ?
+           AND kind = 'autonomy.milestone.sealed'
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(authority.sessionId) as { data_json: string };
+
+    expect(milestone).toMatchObject({
+      gap_id: 2,
+      verdict_id: 1,
+      status: "sealed",
+    });
+    expect(event.data_json).toContain("\"verdictId\":1");
+    expect(gap.evidence).toMatchObject({
+      sealedMilestoneCount: 1,
+    });
+  });
 });
