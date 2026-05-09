@@ -108,6 +108,9 @@ export async function runAutonomyTick(params: {
     sessionKey: params.sessionKey,
     workClass: classification.workClass,
     classificationReason: classification.reason,
+    gapId: classification.gapId ?? null,
+    gapKind: classification.gapKind ?? null,
+    gapEvidence: classification.gapEvidence ?? null,
     artifactRoot: params.artifactRoot,
     now,
   });
