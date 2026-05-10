@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **Live deployment review FAIL (2026-05-10) — three compounding invalidations found: (1) running process started May 8, predates Z5 merge by 2 days; (2) `dist/` build is from May 7, predates all Zenith merges; (3) Zenith schema absent from live DB (`steward_goal_gaps`, `steward_tester_verdicts`, `steward_milestones` all MISSING); (4) `already_compacted_recently` compaction loop blocks autonomy path entirely — no Zenith code has executed. Required: `pnpm build` + gateway restart + DB reset + compaction loop diagnosis.**
+Current phase: **Live deployment review FAIL (2026-05-10). Four deployment invalidations are now converted into the next ordered debug sequence: `LD-A` rebuild/deploy correctness, `LD-B` live DB migration correctness, `LD-C` compaction-loop diagnosis and fix, then `LD-D` valid merged-main live evaluation. No autonomy-quality conclusions are valid until `LD-A` through `LD-C` are closed in order.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is fix the four deployment invalidations before resuming live evaluation
+- the next spec step is execute `LD-A` through `LD-C` in order, then resume valid live deployment evaluation with `LD-D`
 
 ## Live deployment diagnosis — stale gateway process after WS-Z5 merge (2026-05-10)
 
@@ -209,6 +209,100 @@ Firing every ~60s continuously. The session transcript is overflowing; the overf
 3. Delete the live `steward.db` (force fresh migration on boot; Zenith tables created on first `initStewardDb`)
 4. Diagnose and resolve `already_compacted_recently` — it blocks the autonomy path regardless of code correctness
 5. Only after all four steps can observed autonomy behavior be attributed to merged Zenith code
+
+### Next implementation/debug sequence (2026-05-10)
+
+This is now the required ordered sequence. Do not skip ahead.
+
+#### LD-A — rebuild / deploy correctness
+
+Why first:
+- if the running gateway is using stale `dist/`, every later observation is invalid
+
+Intended invariant:
+- the running gateway process must load `dist/` built from the current merged `main`
+- process start time must postdate the rebuild
+
+Scope:
+- rebuild `dist/`
+- restart the gateway
+- prove the running process is new and using the rebuilt artifact set
+
+Required evidence before advancing:
+- `pnpm build` completes successfully on merged `main`
+- rebuilt `dist/` timestamps postdate the build start
+- gateway process uptime resets after restart
+- startup/runtime evidence shows the fresh process, not the May 8 process
+
+Advance only if:
+- stale-process and stale-`dist/` invalidations are both closed
+
+#### LD-B — live DB migration correctness
+
+Why second:
+- even a fresh process is invalid if the live DB schema predates Zenith tables
+
+Intended invariant:
+- a fresh live `steward.db` created by merged `main` must contain all required schema for `Z1–Z5`
+
+Scope:
+- reset the live steward DB
+- boot merged `main`
+- verify migrations through the Zenith tranche are actually applied
+
+Required evidence before advancing:
+- fresh `steward.db` created by merged `main`
+- `PRAGMA user_version` matches the current schema generation
+- live DB contains:
+  - `steward_goal_gaps`
+  - `steward_tester_verdicts`
+  - `steward_milestones`
+- first post-boot writes can target the new schema without fallback or absence
+
+Advance only if:
+- schema absence invalidation is closed
+
+#### LD-C — compaction-loop diagnosis and fix
+
+Why third:
+- if `already_compacted_recently` blocks the autonomy path, merged Zenith code can still remain unreachable even after rebuild and DB reset
+
+Intended invariant:
+- transcript/session compaction must not permanently starve the autonomy path
+- bounded compaction protection may defer work, but must not trap the runtime in a self-repeating no-progress loop
+
+Scope:
+- trace where `already_compacted_recently` is emitted
+- map the exact control path that re-enters compaction every ~60s
+- fix the shared ownership seam so autonomy can reach `recordCurrentAutonomyGoalGap(...)`
+
+Required evidence before advancing:
+- root cause of the compaction loop is mapped in code and documented
+- fresh process no longer emits the same compaction block every cycle
+- at least one autonomy cycle reaches beyond the pre-Zenith compaction choke point
+- recent live evidence shows the autonomy path is no longer being starved before goal-gap logic
+
+Advance only if:
+- compaction invalidation is closed
+
+#### LD-D — valid merged-main live evaluation
+
+This slice is not a build/debug fix. It is the first valid evaluation stage after `LD-A` through `LD-C`.
+
+Intended invariant:
+- live autonomy observations are attributable to merged `main`
+
+What must now be observable:
+- fresh post-Zenith gateway process
+- live DB with Zenith schema present
+- no compaction starvation loop preventing autonomy progression
+- autonomy cycles can now legitimately be judged on:
+  - `autonomy.goal.decision`
+  - `autonomy.gap.recorded`
+  - `autonomy.progress.policy`
+  - tester/milestone/replan behavior
+
+Only after `LD-D` begins may a repeated `baseline_maintenance_window` loop be treated as a real merged-harness logic failure.
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
