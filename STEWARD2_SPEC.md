@@ -59,6 +59,105 @@ Current decision:
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
 - the next spec step is resume merged-main live deployment evaluation
 
+## Live deployment diagnosis — stale gateway process after WS-Z5 merge (2026-05-10)
+
+### Intended invariant
+
+When a slice is merged and deployment testing is resumed against `main`, the running gateway must actually be executing the merged code.  
+“Live evaluation against merged `main`” is false if the process uptime predates the merge and the runtime behavior still matches the pre-merge control path.
+
+### What was checked
+
+- merged state:
+  - `WS-Z5` merged via PR `#34`
+  - merge commit: `3e8633bc24afae27093693689745dd5120f03e4e`
+  - post-merge spec reconciliation pushed on `main`
+- live gateway:
+  - `http://127.0.0.1:19001/health` = `ok`
+  - `http://127.0.0.1:19001/ready` = `true`
+  - `uptimeMs = 218379673`
+- live DB:
+  - `steward.db` present and healthy
+  - repeated autonomy cycles present
+  - runtime not hanging
+
+### Exact live evidence
+
+The latest repeated bridge cycles in the live DB are still:
+- `autonomy.bridge.tick`
+  - `tickStatus = seeded`
+  - `tickReason = baseline_maintenance_window`
+  - `executeOutcome = failed`
+
+The latest maintenance turns are:
+- `work_class = maintenance_work`
+- `status = failed`
+- `proofVerdict = rejected`
+- `taskValueLabel = hollow`
+
+The last 8 `runtime.idle` rows are all:
+- `autonomyWorkClass = maintenance_work`
+- `proofVerdict = rejected`
+- `taskValueLabel = hollow`
+
+The host-owned churn input is already satisfied:
+- recent maintenance/review churn count = `3`
+
+But the expected `WS-Z5` events are absent in the recent live loop:
+- no recent `autonomy.goal.decision`
+- no recent `autonomy.gap.recorded`
+- no recent `autonomy.progress.policy`
+
+### Why this is not yet a proven WS-Z5 logic failure
+
+The gateway `/ready` probe reports:
+- `uptimeMs = 218379673`
+
+That uptime predates the `WS-Z5` merge and tranche-close work. So the current live gateway process has been running continuously across the merge boundary.
+
+That means the present live loop is still consistent with:
+- an old long-lived process that never restarted onto the merged `main` control path
+- therefore still executing the pre-`WS-Z5` autonomy loop behavior
+
+### Structural conclusion
+
+The current failure is a deployment-state invariant failure, not yet a code-invariant failure:
+- we claimed “resume live deployment testing against merged `main`”
+- but the actual running gateway process was not restarted after the merge
+- therefore the live DB evidence cannot yet prove whether merged `WS-Z5` changes autonomy behavior
+
+### Consequences
+
+1. Live evaluation conclusions are currently unreliable.
+   - We cannot attribute the observed maintenance loop to merged `WS-Z5` yet.
+
+2. The apparent “Zenith harness still does nothing” conclusion is premature.
+   - The merged stop/replan controller may simply not be running.
+
+3. Any further debugging at the harness-policy layer before restart risks chasing a ghost.
+   - We would be diagnosing stale runtime behavior, not merged runtime behavior.
+
+### Correct next step
+
+Before any new harness debugging:
+- restart the live gateway onto merged `main`
+- confirm a fresh process start after `WS-Z5` merge
+- then check whether the next autonomy cycles emit:
+  - `autonomy.goal.decision`
+  - `autonomy.gap.recorded`
+  - `autonomy.progress.policy`
+
+Only after that restart can a repeated `baseline_maintenance_window` loop be treated as a real merged-`WS-Z5` logic bug.
+
+### What is not needed yet
+
+- no new `WS-Z5` code slice
+- no new patch to churn thresholds
+- no new gap/replan logic hypothesis
+
+The missing step is deployment correctness:
+- merged code must actually be the code that is running
+
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
 
