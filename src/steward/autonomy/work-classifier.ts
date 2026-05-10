@@ -15,11 +15,11 @@ export type ClassifiedAutonomyWork = {
   gapEvidence?: Record<string, unknown>;
 };
 
-export function classifyAutonomyWork(params: {
+export async function classifyAutonomyWork(params: {
   sessionId: string;
   now?: number;
-}): ClassifiedAutonomyWork {
-  const gap = recordCurrentAutonomyGoalGap({
+}): Promise<ClassifiedAutonomyWork> {
+  const gap = await recordCurrentAutonomyGoalGap({
     sessionId: params.sessionId,
     now: params.now,
   });

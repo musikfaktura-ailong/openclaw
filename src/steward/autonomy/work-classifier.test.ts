@@ -13,10 +13,10 @@ describe("WS-IC work classifier", () => {
     resetDbForTest();
   });
 
-  it("classifies goal work when the session has no proof yet", () => {
+  it("classifies goal work when the session has no proof yet", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-goal", 1_000);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+    await expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).resolves.toMatchObject({
       workClass: "goal_work",
       reason: "no_recorded_proof_yet",
     });
@@ -30,7 +30,7 @@ describe("WS-IC work classifier", () => {
     });
   });
 
-  it("classifies diagnostic work when an active blocker exists", () => {
+  it("classifies diagnostic work when an active blocker exists", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-diagnostic", 1_000);
     const db = getDb();
     db.prepare(
@@ -45,13 +45,13 @@ describe("WS-IC work classifier", () => {
        ) VALUES (?, ?, 'operator_required', 'active', 0, '{}', ?, ?)` ,
     ).run(flowId, flowId, 1_100, 1_100);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+    await expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).resolves.toMatchObject({
       workClass: "diagnostic_work",
       reason: "active_blockers_present",
     });
   });
 
-  it("classifies review work when proofs exist but no audit report has been recorded", () => {
+  it("classifies review work when proofs exist but no audit report has been recorded", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-review", 1_000);
     const db = getDb();
     db.prepare(
@@ -65,13 +65,13 @@ describe("WS-IC work classifier", () => {
        VALUES (?, ?, NULL, 'runtime.idle', 'idle', '{}')` ,
     ).run(1_200, authority.sessionId);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+    await expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).resolves.toMatchObject({
       workClass: "review_or_consolidation",
       reason: "audit_missing",
     });
   });
 
-  it("classifies tester work after an accepted goal-work proof with no tester verdict yet", () => {
+  it("classifies tester work after an accepted goal-work proof with no tester verdict yet", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-tester", 1_000);
     getDb()
       .prepare(
@@ -111,13 +111,13 @@ describe("WS-IC work classifier", () => {
       )
       .run(100, 11, authority.sessionId, 11, 1_030, 1_030);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+    await expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).resolves.toMatchObject({
       workClass: "tester_work",
       reason: "tester_required_after_accepted_proof",
     });
   });
 
-  it("classifies diagnostic work after consecutive failed primary tasks", () => {
+  it("classifies diagnostic work after consecutive failed primary tasks", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-frustration", 1_000);
     const db = getDb();
     db.prepare(
@@ -144,13 +144,13 @@ describe("WS-IC work classifier", () => {
       ).run(flowId, flowId, 1_100 + index, 1_100 + index);
     }
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+    await expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).resolves.toMatchObject({
       workClass: "diagnostic_work",
       reason: "consecutive_primary_failures",
     });
   });
 
-  it("falls through to maintenance work when no higher-priority condition is active", () => {
+  it("falls through to maintenance work when no higher-priority condition is active", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:auto-maintenance", 1_000);
     const db = getDb();
     db.prepare(
@@ -164,7 +164,7 @@ describe("WS-IC work classifier", () => {
        VALUES (?, ?, NULL, 'mission.audit.report', 'audit', '{}')` ,
     ).run(1_060, authority.sessionId);
 
-    expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).toMatchObject({
+    await expect(classifyAutonomyWork({ sessionId: authority.sessionId, now: 2_000 })).resolves.toMatchObject({
       workClass: "maintenance_work",
       reason: "baseline_maintenance_window",
     });
