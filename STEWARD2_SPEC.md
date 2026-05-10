@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **Live deployment review FAIL (2026-05-10). Four deployment invalidations are now converted into the next ordered debug sequence: `LD-A` rebuild/deploy correctness, `LD-B` live DB migration correctness, `LD-C` compaction-loop diagnosis and fix, then `LD-D` valid merged-main live evaluation. No autonomy-quality conclusions are valid until `LD-A` through `LD-C` are closed in order.**
+Current phase: **`LD-A` closed on live merged `main` (2026-05-11). Next required step is `LD-B` live DB migration correctness, then `LD-C` compaction-loop diagnosis and fix, then `LD-D` valid merged-main live evaluation. No autonomy-quality conclusions are valid until `LD-B` and `LD-C` are also closed.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,8 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is execute `LD-A` through `LD-C` in order, then resume valid live deployment evaluation with `LD-D`
+- `LD-A` is now closed with fresh build/restart evidence on live merged `main`
+- the next spec step is execute `LD-B` and `LD-C` in order, then resume valid live deployment evaluation with `LD-D`
 
 ## Live deployment diagnosis — stale gateway process after WS-Z5 merge (2026-05-10)
 
@@ -236,6 +237,34 @@ Required evidence before advancing:
 
 Advance only if:
 - stale-process and stale-`dist/` invalidations are both closed
+
+Implementation/debug record (2026-05-11):
+- rebuilt merged `main` successfully with `corepack pnpm build`
+- verified rebuilt artifact root:
+  - `C:\ai_agent\Steward2\dist`
+  - `LastWriteTime = 2026-05-11 00:00:16`
+- stopped stale live gateway listener on `127.0.0.1:19001`:
+  - old PID `56276`
+- restarted the live gateway from merged `main`
+- verified fresh live process after restart:
+  - listener PID `67992`
+  - process start time `2026-05-11 00:02:27`
+  - `/ready` returned `ready = true`
+  - `/ready.uptimeMs = 192092`
+- gateway stdout proves the fresh bind belongs to the restarted process:
+  - `2026-05-11T00:03:12 [gateway] starting HTTP server...`
+  - `2026-05-11T00:03:12 [gateway] ready`
+
+Structural note:
+- startup emitted one non-blocking Control UI build warning:
+  - auto-build attempted and stderr reported missing UI runner / `pnpm`
+  - this did not prevent the rebuilt gateway from binding or serving `/ready`
+- LD-A owns rebuild/deploy correctness only; Control UI asset-build noise is not the active invalidation after the successful bind
+
+Verdict:
+- stale-process invalidation: closed
+- stale-`dist/` invalidation: closed
+- `LD-A`: PASS / ADVANCE to `LD-B`
 
 #### LD-B — live DB migration correctness
 
