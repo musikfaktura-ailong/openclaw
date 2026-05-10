@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z5` is implemented locally on `ws-z5` (2026-05-10) and ready for reviewer gate. The harness can now name gaps, require an independent tester, seal milestones, extract reusable skills, and make a host-owned stop vs continue vs replan decision from persisted evidence. Next step: reviewer gate for `WS-Z5`.**
+Current phase: **`WS-Z5` reviewed PASS on `ws-z5` (2026-05-10). 5/5 gate conditions confirmed. Host-owned stopping controller reads persisted evidence only; explicit thresholds for replan (≥2 consecutive challenges or ≥3 churn cycles with zero milestones); stop_completed resolves all open gaps and halts the runner tick. Zenith harness (Z1–Z5) is now feature-complete. 28/28 tests pass. Next step: advance WS-Z5.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is implement for `WS-Z5` (stopping and replanning controller)
+- the next spec step is advance WS-Z5 (Zenith harness complete)
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -8203,7 +8203,32 @@ Current carry-forwards:
 
 | Workstream | Status | Notes |
 |---|---|---|
-| WS-Z5 | `implement` | implemented locally on `ws-z5`; focused verification PASS; waiting for reviewer gate |
+| WS-Z5 | `advance-ready` | implemented locally on `ws-z5`; focused verification PASS; reviewer gate PASS |
+
+#### Reviewer gate record (2026-05-10)
+
+**G1 — Closed-goal stopping is now host-owned and no longer deferred:** PASS
+`evaluateAutonomyProgressDecision` is called inside `recordCurrentAutonomyGoalGap` (host-owned, inside `withImmediateTransactionAsync`). On `stop_completed`, all open gaps are immediately resolved, a `goal_completed` gap row is persisted, and `autonomy-runner.ts` returns a `noop` outcome before any new task is seeded. The WS-Z1 deferral is now closed.
+
+**G2 — Controller uses persisted evidence only, not transient planner text:** PASS
+`stopping-controller.ts` reads exclusively from: `steward_tester_verdicts` (latest verdict, recent challenged count), `steward_events` joined with `steward_flows.state_json` (maintenance churn count), and `sealedMilestoneCount` passed from `countSealedMilestones` (persisted `steward_milestones` count). No transient planner output or in-memory accumulation.
+
+**G3 — `replan_goal` threshold is explicit and numeric:** PASS
+Two explicit thresholds: `recentChallengedCount >= 2` (consecutive challenged verdicts in last 2 rows) or `recentChurnCount >= 3 && sealedMilestoneCount === 0` (three consecutive low-value maintenance/review events with no sealed milestone). Both are SQL-derived counts. No vague "seems stuck" logic.
+
+**G4 — Stop decision prevents new autonomy work on the next tick:** PASS
+`autonomy-runner.ts`: `classification.decision === "stop_completed"` triggers early return path — sets idle backoff, calls `markAutonomyTickRan`, emits `autonomy.tick.noop` with `reason: "goal_completed"`, returns `{ status: "noop", workClass: null }`. No new autonomy task seeded. The `workClass: null` addition to the noop type correctly models the terminal state.
+
+**G5 — User-turn path unaffected:** PASS
+`ws-a.integration.test.ts` passed unchanged. `evaluateAutonomyProgressDecision` is only reachable from `recordCurrentAutonomyGoalGap` → `classifyAutonomyWork` → `runAutonomyTick` — all autonomy-tick-only paths.
+
+One structural note (no carry-forward): `countSealedMilestones` is called twice inside the same transaction — once inside `proposeCurrentGap` (for `sealedMilestoneCount` in the gap evidence spread) and once explicitly before `evaluateAutonomyProgressDecision`. The values are identical since the transaction prevents any interleaving write. Minor double-read, no functional consequence.
+
+Unrelated local leftover noted by user: `artifacts/` untracked directory — not touched by this implementation, not a carry-forward for WS-Z5.
+
+28/28 tests pass across 5 test files.
+
+Verdict: **PASS**
 
 ---
 
