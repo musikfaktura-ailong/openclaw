@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z4` implemented on `ws-z4` (2026-05-10). Reusable skill capture is now wired from sealed milestones into the WS-G skill store, and future gap evidence includes matched skill references when title overlap qualifies. Focused `WS-Z4` suites pass locally. Next step: review WS-Z4.**
+Current phase: **`WS-Z4` reviewed PASS on `ws-z4` (2026-05-10). 5/5 gate conditions confirmed. Skill extracted from sealed milestone worker proof (title + tool event sequence). Reused milestone guard prevents duplicate extraction. Matched skill reference injected into all gap kinds via `finalizeProposedGap`. `async` propagated through `classifyAutonomyWork` → `runAutonomyTick`. 20/20 tests pass. Next step: advance WS-Z4.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is review for `WS-Z4` (reusable skill capture)
+- the next spec step is advance WS-Z4 (reusable skill capture)
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7902,6 +7902,31 @@ Observed DB evidence from focused tests:
   - `matchedSkillId` present
   - `matchedSkillTitle` present
   - `matchedSkillScore >= 0.3`
+
+#### Reviewer gate record (2026-05-10)
+
+**G1 — `extractMilestoneSkill` called inside transaction, not after:** PASS
+`recordCurrentAutonomyGoalGap` uses `withImmediateTransactionAsync`; `extractMilestoneSkill` is awaited inside the async callback before `COMMIT`. The new `withImmediateTransactionAsync` in `tx.ts` holds `BEGIN IMMEDIATE` across the async boundary, which is safe because the steward autonomy runner is single-process sequential.
+
+**G2 — Skipped when `milestone.reused === true`:** PASS
+`if (milestone && !milestone.reused)` guard in `goal-gap-registry.ts`. The integration test confirms only one `steward_knowledge` row is created even when the same confirmed milestone is processed twice.
+
+**G3 — null `flow_id` is a no-op:** PASS
+`skill-bridge.ts`: `if (!proof || proof.flowId == null) { return null; }` — no error thrown, no row inserted. Confirmed by dedicated test (AC-3 equivalent).
+
+**G4 — `matchGapSkill` result merged into evidence for all gap kinds:** PASS
+`finalizeProposedGap` spreads `...(matchedSkill ?? {})` into evidence. Every return path in `proposeCurrentGap` now routes through `finalizeProposedGap` — all six gap kinds are covered. When no skill matches, the spread is a no-op.
+
+**G5 — `async` propagated end-to-end; all callers updated:** PASS
+`recordCurrentAutonomyGoalGap` → async. `classifyAutonomyWork` → async + awaits. `runAutonomyTick` → already async, now `await classifyAutonomyWork(...)`. `tester-policy.test.ts` and `goal-gap-registry.test.ts` updated to `async` test functions. TypeScript confirms no callers dropped.
+
+One structural note (no carry-forward): tool sequence is sourced from `steward_events` with `kind IN ('tool.postcheck.normalized', 'tool.postcheck.classified')` ordered by `id ASC` — not from `steward_flow_tasks`. This is the actual runtime-populated source; `steward_flow_tasks` records task status, not individual tool calls. The approach is correct.
+
+Unrelated local leftover noted by user: `artifacts/` untracked directory — not touched by this implementation, not a carry-forward for WS-Z4.
+
+20/20 tests pass across 5 test files.
+
+Verdict: **PASS**
 
 ---
 
