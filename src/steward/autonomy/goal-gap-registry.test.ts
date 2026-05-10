@@ -514,4 +514,181 @@ describe("WS-Z1 goal gap registry", () => {
     expect(Number(gap.evidence.matchedSkillScore ?? 0)).toBeGreaterThanOrEqual(0.3);
     expect(Number(gap.evidence.matchedSkillId ?? 0)).toBeGreaterThan(0);
   });
+
+  it("records a resolved goal_completed gap and decision event when a confirmed path has no remaining semantic gap", async () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:z5-goal-stop", 8_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES (2, ?, NULL, NULL, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap', 'Details', '{}', ?, ?)`,
+      )
+      .run(authority.sessionId, 8_005, 8_005);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES
+           (601, NULL, ?, NULL, 'general', 'Goal Task', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?),
+           (701, NULL, ?, NULL, 'general', 'Tester Task', 'confirmed proof', '', 'accepted', 1, '', 1, 'confirmed', ?, NULL, '', ?)`,
+      )
+      .run(authority.sessionId, 8_006, 8_006, authority.sessionId, 8_007, 8_007);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_tester_verdicts (
+           id, session_id, gap_id, worker_proof_id, tester_proof_id, verdict, challenge_summary, created_ts, updated_ts
+         ) VALUES (1, ?, 2, 601, 701, 'confirmed', '', ?, ?)`,
+      )
+      .run(authority.sessionId, 8_010, 8_010);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_milestones (
+           session_id, gap_id, verdict_id, milestone_kind, title, status, evidence_json, created_ts, updated_ts
+         ) VALUES (?, 2, 1, 'goal_gap_confirmed', 'Milestone sealed', 'sealed', '{}', ?, ?)`,
+      )
+      .run(authority.sessionId, 8_020, 8_020);
+    appendStewardEvent({
+      kind: "mission.audit.report",
+      message: "audit",
+      sessionId: authority.sessionId,
+      now: 8_040,
+      data: {},
+    });
+
+    const gap = await recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 8_100,
+    });
+
+    const goalRow = getDb()
+      .prepare(
+        `SELECT gap_kind, work_class, reason, status
+         FROM steward_goal_gaps
+         WHERE session_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(authority.sessionId) as {
+      gap_kind: string;
+      work_class: string;
+      reason: string;
+      status: string;
+    };
+    const decisionEvent = getDb()
+      .prepare(
+        `SELECT data_json
+         FROM steward_events
+         WHERE session_id = ?
+           AND kind = 'autonomy.goal.decision'
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(authority.sessionId) as { data_json: string };
+
+    expect(gap).toMatchObject({
+      decision: "stop_completed",
+      gapKind: "goal_completed",
+      workClass: "goal_work",
+      reason: "goal_completed_after_confirmed_tester_verdict",
+      status: "resolved",
+    });
+    expect(goalRow).toMatchObject({
+      gap_kind: "goal_completed",
+      work_class: "goal_work",
+      reason: "goal_completed_after_confirmed_tester_verdict",
+      status: "resolved",
+    });
+    expect(decisionEvent.data_json).toContain("\"decision\":\"stop_completed\"");
+  });
+
+  it("records a diagnostic replanning gap after repeated challenged tester verdicts", async () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:z5-replan-gap", 9_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES
+           (2, ?, NULL, NULL, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap', 'Details', '{}', ?, ?),
+           (3, ?, NULL, NULL, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap 2', 'Details', '{}', ?, ?)`,
+      )
+      .run(authority.sessionId, 9_005, 9_005, authority.sessionId, 9_006, 9_006);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES
+           (801, NULL, ?, NULL, 'general', 'Goal Task', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?),
+           (802, NULL, ?, NULL, 'general', 'Goal Task 2', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)`,
+      )
+      .run(
+        authority.sessionId,
+        9_007,
+        9_007,
+        authority.sessionId,
+        9_009,
+        9_009,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES
+           (901, NULL, ?, NULL, 'general', 'Tester Task 1', 'challenged proof', '', 'rejected', 0, 'ungrounded', 1, 'challenge', NULL, ?, 'challenge one', ?),
+           (902, NULL, ?, NULL, 'general', 'Tester Task 2', 'challenged proof', '', 'rejected', 0, 'ungrounded', 1, 'challenge', NULL, ?, 'challenge two', ?)`,
+      )
+      .run(authority.sessionId, 9_008, 9_008, authority.sessionId, 9_010, 9_010);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_tester_verdicts (
+           id, session_id, gap_id, worker_proof_id, tester_proof_id, verdict, challenge_summary, created_ts, updated_ts
+         ) VALUES
+           (1, ?, 2, 801, 901, 'challenged', 'challenge one', ?, ?),
+           (2, ?, 3, 802, 902, 'challenged', 'challenge two', ?, ?)`,
+      )
+      .run(authority.sessionId, 9_010, 9_010, authority.sessionId, 9_020, 9_020);
+    appendStewardEvent({
+      kind: "mission.audit.report",
+      message: "audit",
+      sessionId: authority.sessionId,
+      now: 9_040,
+      data: {},
+    });
+
+    const gap = await recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 9_100,
+    });
+
+    const gapRow = getDb()
+      .prepare(
+        `SELECT gap_kind, work_class, reason, status
+         FROM steward_goal_gaps
+         WHERE session_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get(authority.sessionId) as {
+      gap_kind: string;
+      work_class: string;
+      reason: string;
+      status: string;
+    };
+
+    expect(gap).toMatchObject({
+      decision: "replan_goal",
+      gapKind: "replan_required_after_repeated_challenged_path",
+      workClass: "diagnostic_work",
+      reason: "replan_required_after_repeated_challenged_path",
+      status: "open",
+    });
+    expect(gapRow).toMatchObject({
+      gap_kind: "replan_required_after_repeated_challenged_path",
+      work_class: "diagnostic_work",
+      reason: "replan_required_after_repeated_challenged_path",
+      status: "open",
+    });
+  });
 });

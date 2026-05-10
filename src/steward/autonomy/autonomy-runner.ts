@@ -25,9 +25,9 @@ export type AutonomyTickOutcome =
   | {
       status: "noop";
       sessionId: string;
-      reason: "duplicate_seed_suppressed";
+      reason: "duplicate_seed_suppressed" | "goal_completed";
       nextAllowedTickTs: number;
-      workClass: AutonomyWorkClass;
+      workClass: AutonomyWorkClass | null;
       flowId: number | null;
       taskId: null;
     }
@@ -86,6 +86,39 @@ export async function runAutonomyTick(params: {
     sessionId: decision.sessionId,
     now,
   });
+  if (classification.decision === "stop_completed" || classification.status === "resolved") {
+    const nextAllowedTickTs = now + INITIAL_IDLE_BACKOFF_MS;
+    setAutonomyIdleBackoff({
+      idleBackoffMs: INITIAL_IDLE_BACKOFF_MS,
+      now,
+    });
+    markAutonomyTickRan({
+      now,
+      nextAllowedTickTs,
+    });
+    appendStewardEvent({
+      kind: "autonomy.tick.noop",
+      message: "autonomy tick stopped after closed-goal decision",
+      sessionId: decision.sessionId,
+      now,
+      data: {
+        reason: "goal_completed",
+        decision: classification.decision,
+        workClass: classification.workClass,
+        gapKind: classification.gapKind ?? null,
+        nextAllowedTickTs,
+      },
+    });
+    return {
+      status: "noop",
+      sessionId: decision.sessionId,
+      reason: "goal_completed",
+      nextAllowedTickTs,
+      workClass: null,
+      flowId: null,
+      taskId: null,
+    };
+  }
   if (classification.reason.startsWith("repeated_bad_outcomes_for_")) {
     appendAutonomyProgressDecisionEvent({
       sessionKey: params.sessionKey,

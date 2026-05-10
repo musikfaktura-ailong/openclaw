@@ -4,6 +4,10 @@ import { appendStewardEvent } from "../runtime/runtime-events.js";
 import { countSealedMilestones, sealCurrentMilestone } from "./milestone-registry.js";
 import { resolveAutonomyWorkClassBoundary } from "./progress-discipline.js";
 import { extractMilestoneSkill, matchGapSkill } from "./skill-bridge.js";
+import {
+  evaluateAutonomyProgressDecision,
+  type AutonomyGoalDecision,
+} from "./stopping-controller.js";
 import { recordLatestTesterVerdict, resolveTesterGapRequirement } from "./tester-policy.js";
 
 export type AutonomyGapWorkClass =
@@ -16,6 +20,7 @@ export type AutonomyGapWorkClass =
 export type RecordedAutonomyGoalGap = {
   gapId: number;
   sessionId: string;
+  decision: AutonomyGoalDecision;
   gapKind: string;
   workClass: AutonomyGapWorkClass;
   reason: string;
@@ -23,7 +28,7 @@ export type RecordedAutonomyGoalGap = {
   details: string;
   sourceFlowId: number | null;
   sourceHostTaskId: number | null;
-  status: "open";
+  status: "open" | "resolved";
   evidence: Record<string, unknown>;
   reused: boolean;
 };
@@ -35,7 +40,7 @@ function countRows(sql: string, ...params: SqlParam[]): number {
   return Number(row?.count ?? 0);
 }
 
-type ProposedGap = Omit<RecordedAutonomyGoalGap, "gapId" | "sessionId" | "status" | "reused">;
+type ProposedGap = Omit<RecordedAutonomyGoalGap, "gapId" | "sessionId" | "decision" | "status" | "reused">;
 
 function finalizeProposedGap(params: {
   sessionId: string;
@@ -54,6 +59,55 @@ function finalizeProposedGap(params: {
     ...params.gap,
     evidence: withMilestoneEvidence(evidence, params.sealedMilestoneCount),
   };
+}
+
+function buildReplanGap(params: {
+  sourceGap: ProposedGap;
+  decisionReason: string;
+  decisionDetails: Record<string, unknown>;
+  sealedMilestoneCount: number;
+}): ProposedGap {
+  return {
+    gapKind: params.decisionReason,
+    workClass: "diagnostic_work",
+    reason: params.decisionReason,
+    title: "Autonomy gap: replanning required",
+    details:
+      "Host-owned evidence shows the current path is structurally weak. The next autonomy cycle must replan instead of continuing the same work family.",
+    sourceFlowId: params.sourceGap.sourceFlowId,
+    sourceHostTaskId: params.sourceGap.sourceHostTaskId,
+    evidence: withMilestoneEvidence(
+      {
+        ...params.sourceGap.evidence,
+        proposedGapKind: params.sourceGap.gapKind,
+        proposedWorkClass: params.sourceGap.workClass,
+        ...params.decisionDetails,
+      },
+      params.sealedMilestoneCount,
+    ),
+  };
+}
+
+function appendGoalDecisionEvent(params: {
+  sessionId: string;
+  now: number;
+  sourceFlowId: number | null;
+  decision: AutonomyGoalDecision;
+  reason: string;
+  details: Record<string, unknown>;
+}): void {
+  appendStewardEvent({
+    kind: "autonomy.goal.decision",
+    message: `autonomy goal decision: ${params.decision}`,
+    sessionId: params.sessionId,
+    flowId: params.sourceFlowId,
+    now: params.now,
+    data: {
+      decision: params.decision,
+      reason: params.reason,
+      ...params.details,
+    },
+  });
 }
 
 function latestProofSummary(sessionId: string): {
@@ -379,6 +433,12 @@ export async function recordCurrentAutonomyGoalGap(params: {
       now,
       sealedMilestoneCount: countSealedMilestones(params.sessionId),
     });
+    const sealedMilestoneCount = countSealedMilestones(params.sessionId);
+    const progressDecision = evaluateAutonomyProgressDecision({
+      sessionId: params.sessionId,
+      proposedGap: proposed,
+      sealedMilestoneCount,
+    });
     const currentOpen = db
       .prepare(
         `SELECT id, gap_kind, work_class, reason
@@ -388,6 +448,129 @@ export async function recordCurrentAutonomyGoalGap(params: {
          ORDER BY id DESC`,
       )
       .all(params.sessionId) as Array<{ id: number; gap_kind: string; work_class: string; reason: string }>;
+
+    const finalGap =
+      progressDecision.decision === "replan_goal"
+        ? buildReplanGap({
+            sourceGap: proposed,
+            decisionReason: progressDecision.reason,
+            decisionDetails: progressDecision.details,
+            sealedMilestoneCount,
+          })
+        : proposed;
+
+    appendGoalDecisionEvent({
+      sessionId: params.sessionId,
+      now,
+      sourceFlowId: finalGap.sourceFlowId,
+      decision: progressDecision.decision,
+      reason: progressDecision.reason,
+      details: progressDecision.details,
+    });
+
+    if (progressDecision.decision === "stop_completed") {
+      db.prepare(
+        `UPDATE steward_goal_gaps
+         SET status = 'resolved', updated_ts = ?
+         WHERE session_id = ?
+           AND status = 'open'`,
+      ).run(now, params.sessionId);
+
+      const closedReason = progressDecision.reason;
+      const existingResolved = db
+        .prepare(
+          `SELECT id
+           FROM steward_goal_gaps
+           WHERE session_id = ?
+             AND status = 'resolved'
+             AND gap_kind = 'goal_completed'
+             AND work_class = 'goal_work'
+             AND reason = ?
+           ORDER BY id DESC
+           LIMIT 1`,
+        )
+        .get(params.sessionId, closedReason) as { id: number } | undefined;
+      const evidence = withMilestoneEvidence(
+        {
+          ...finalGap.evidence,
+          ...progressDecision.details,
+        },
+        sealedMilestoneCount,
+      );
+      let gapId: number;
+      let reused = false;
+      if (existingResolved) {
+        reused = true;
+        gapId = existingResolved.id;
+        db.prepare(
+          `UPDATE steward_goal_gaps
+           SET source_flow_id = ?, source_host_task_id = ?, title = ?, details = ?, evidence_json = ?, updated_ts = ?, status = 'resolved'
+           WHERE id = ?`,
+        ).run(
+          finalGap.sourceFlowId,
+          finalGap.sourceHostTaskId,
+          "Autonomy goal completed",
+          "The host recorded a closed-goal stop decision after confirmed milestone evidence satisfied the current governing goal.",
+          JSON.stringify(evidence),
+          now,
+          gapId,
+        );
+      } else {
+        const result = db
+          .prepare(
+            `INSERT INTO steward_goal_gaps (
+               session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+             ) VALUES (?, ?, ?, 'goal_completed', 'goal_work', ?, 'resolved', ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            params.sessionId,
+            finalGap.sourceFlowId,
+            finalGap.sourceHostTaskId,
+            closedReason,
+            "Autonomy goal completed",
+            "The host recorded a closed-goal stop decision after confirmed milestone evidence satisfied the current governing goal.",
+            JSON.stringify(evidence),
+            now,
+            now,
+          ) as { lastInsertRowid: number | bigint };
+        gapId = Number(result.lastInsertRowid);
+      }
+
+      appendStewardEvent({
+        kind: "autonomy.gap.recorded",
+        message: "Autonomy goal completed",
+        sessionId: params.sessionId,
+        flowId: finalGap.sourceFlowId,
+        now,
+        data: {
+          gapId,
+          gapKind: "goal_completed",
+          workClass: "goal_work",
+          reason: closedReason,
+          sourceHostTaskId: finalGap.sourceHostTaskId,
+          sourceFlowId: finalGap.sourceFlowId,
+          reused,
+          evidence,
+        },
+      });
+
+      return {
+        gapId,
+        sessionId: params.sessionId,
+        decision: progressDecision.decision,
+        gapKind: "goal_completed",
+        workClass: "goal_work",
+        reason: closedReason,
+        title: "Autonomy goal completed",
+        details:
+          "The host recorded a closed-goal stop decision after confirmed milestone evidence satisfied the current governing goal.",
+        sourceFlowId: finalGap.sourceFlowId,
+        sourceHostTaskId: finalGap.sourceHostTaskId,
+        status: "resolved",
+        evidence,
+        reused,
+      };
+    }
 
     db.prepare(
       `UPDATE steward_goal_gaps
@@ -399,13 +582,13 @@ export async function recordCurrentAutonomyGoalGap(params: {
            AND work_class = ?
            AND reason = ?
          )`,
-    ).run(now, params.sessionId, proposed.gapKind, proposed.workClass, proposed.reason);
+    ).run(now, params.sessionId, finalGap.gapKind, finalGap.workClass, finalGap.reason);
 
     const matchingOpen = currentOpen.find(
       (row) =>
-        row.gap_kind === proposed.gapKind &&
-        row.work_class === proposed.workClass &&
-        row.reason === proposed.reason,
+        row.gap_kind === finalGap.gapKind &&
+        row.work_class === finalGap.workClass &&
+        row.reason === finalGap.reason,
     );
 
     let gapId: number;
@@ -418,11 +601,11 @@ export async function recordCurrentAutonomyGoalGap(params: {
          SET source_flow_id = ?, source_host_task_id = ?, title = ?, details = ?, evidence_json = ?, updated_ts = ?, status = 'open'
          WHERE id = ?`,
       ).run(
-        proposed.sourceFlowId,
-        proposed.sourceHostTaskId,
-        proposed.title,
-        proposed.details,
-        JSON.stringify(proposed.evidence),
+        finalGap.sourceFlowId,
+        finalGap.sourceHostTaskId,
+        finalGap.title,
+        finalGap.details,
+        JSON.stringify(finalGap.evidence),
         now,
         gapId,
       );
@@ -430,19 +613,19 @@ export async function recordCurrentAutonomyGoalGap(params: {
       const result = db
         .prepare(
           `INSERT INTO steward_goal_gaps (
-             session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+            session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
            ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
         )
         .run(
           params.sessionId,
-          proposed.sourceFlowId,
-          proposed.sourceHostTaskId,
-          proposed.gapKind,
-          proposed.workClass,
-          proposed.reason,
-          proposed.title,
-          proposed.details,
-          JSON.stringify(proposed.evidence),
+          finalGap.sourceFlowId,
+          finalGap.sourceHostTaskId,
+          finalGap.gapKind,
+          finalGap.workClass,
+          finalGap.reason,
+          finalGap.title,
+          finalGap.details,
+          JSON.stringify(finalGap.evidence),
           now,
           now,
         ) as { lastInsertRowid: number | bigint };
@@ -451,34 +634,35 @@ export async function recordCurrentAutonomyGoalGap(params: {
 
     appendStewardEvent({
       kind: "autonomy.gap.recorded",
-      message: proposed.title,
+      message: finalGap.title,
       sessionId: params.sessionId,
-      flowId: proposed.sourceFlowId,
+      flowId: finalGap.sourceFlowId,
       now,
       data: {
         gapId,
-        gapKind: proposed.gapKind,
-        workClass: proposed.workClass,
-        reason: proposed.reason,
-        sourceHostTaskId: proposed.sourceHostTaskId,
-        sourceFlowId: proposed.sourceFlowId,
+        gapKind: finalGap.gapKind,
+        workClass: finalGap.workClass,
+        reason: finalGap.reason,
+        sourceHostTaskId: finalGap.sourceHostTaskId,
+        sourceFlowId: finalGap.sourceFlowId,
         reused,
-        evidence: proposed.evidence,
+        evidence: finalGap.evidence,
       },
     });
 
     return {
       gapId,
       sessionId: params.sessionId,
-      gapKind: proposed.gapKind,
-      workClass: proposed.workClass,
-      reason: proposed.reason,
-      title: proposed.title,
-      details: proposed.details,
-      sourceFlowId: proposed.sourceFlowId,
-      sourceHostTaskId: proposed.sourceHostTaskId,
+      decision: progressDecision.decision,
+      gapKind: finalGap.gapKind,
+      workClass: finalGap.workClass,
+      reason: finalGap.reason,
+      title: finalGap.title,
+      details: finalGap.details,
+      sourceFlowId: finalGap.sourceFlowId,
+      sourceHostTaskId: finalGap.sourceHostTaskId,
       status: "open",
-      evidence: proposed.evidence,
+      evidence: finalGap.evidence,
       reused,
     };
   });

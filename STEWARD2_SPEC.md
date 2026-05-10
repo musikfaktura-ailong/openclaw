@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z4` reviewed PASS on `ws-z4` (2026-05-10). 5/5 gate conditions confirmed. Skill extracted from sealed milestone worker proof (title + tool event sequence). Reused milestone guard prevents duplicate extraction. Matched skill reference injected into all gap kinds via `finalizeProposedGap`. `async` propagated through `classifyAutonomyWork` → `runAutonomyTick`. 20/20 tests pass. Next step: advance WS-Z4.**
+Current phase: **`WS-Z5` is implemented locally on `ws-z5` (2026-05-10) and ready for reviewer gate. The harness can now name gaps, require an independent tester, seal milestones, extract reusable skills, and make a host-owned stop vs continue vs replan decision from persisted evidence. Next step: reviewer gate for `WS-Z5`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is advance WS-Z4 (reusable skill capture)
+- the next spec step is implement for `WS-Z5` (stopping and replanning controller)
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7927,6 +7927,283 @@ Unrelated local leftover noted by user: `artifacts/` untracked directory — not
 20/20 tests pass across 5 test files.
 
 Verdict: **PASS**
+
+---
+
+## WS-Z4 post-merge reconciliation + WS-Z5 (2026-05-10)
+
+Merge result:
+- `WS-Z4` merged via PR `#33`
+
+Reconciliation:
+- the reusable skill lane is now on `main`
+- sealed milestones now extract reusable `skill_sequence` knowledge into the existing WS-G skill store
+- skill extraction is host-owned and only fires when a milestone is newly sealed (`!milestone.reused`)
+- the persisted sequence source is the real runtime ledger:
+  - `steward_events.kind IN ('tool.postcheck.normalized', 'tool.postcheck.classified')`
+  - ordered by `id ASC`
+- future gap evidence now includes:
+  - `matchedSkillId`
+  - `matchedSkillTitle`
+  - `matchedSkillScore`
+  when title overlap qualifies
+- the gap pipeline is now async end-to-end:
+  - `recordCurrentAutonomyGoalGap`
+  - `classifyAutonomyWork`
+  - `runAutonomyTick`
+- all five reviewer gate conditions confirmed; no carry-forwards
+- `artifacts/` untracked local leftover: not a Z4 concern, not touched, not a carry-forward
+
+Decision:
+- `WS-Z4` tranche is **closed**
+- no `WS-Z4` carry-forwards remain open
+
+Remaining gap exposed by Z4:
+- the harness can now accumulate evidence, but it still has no host-owned controller that decides:
+  - stop because the governing semantic gap is closed and the session has enough confirmed milestones
+  - continue because real unresolved gaps remain
+  - replan because the current milestone/gap mix is no longer the right path
+- `WS-Z1` explicitly deferred closed-goal stopping to `WS-Z5`
+- `WS-Z3` created the canonical sealed milestone count
+- `WS-Z4` created the reusable-skill/stability signal
+- `WS-Z5` is now the slice that must turn those signals into a principled stop/replan decision
+
+Next process step:
+- open `WS-Z5` (stopping and replanning controller)
+
+---
+
+### WS-Z5 — stopping and replanning controller (2026-05-10)
+
+Why this slice exists:
+- `WS-Z1` gave the harness a persisted governing gap
+- `WS-Z2` removed worker self-certification by requiring an independent tester
+- `WS-Z3` made confirmed progress durable through sealed milestones
+- `WS-Z4` made prior successful procedure reusable through the skill store
+- what is still missing is the host-owned decision about when to:
+  - stop
+  - continue
+  - replan
+- without `WS-Z5`, the harness can accumulate evidence forever but cannot close a session goal or switch plan class in a principled, queryable way
+
+Implementer: Codex
+
+Reviewer: Claude
+
+#### Intended invariant
+
+After each autonomy cycle, the host must make one queryable stopping decision from persisted evidence:
+- `stop_completed`
+  - when the current governing goal has no remaining semantic gap and the session has enough confirmed milestone evidence
+- `continue_current_gap`
+  - when a real unresolved gap remains and no stronger replan condition is active
+- `replan_goal`
+  - when the current path has become structurally weak despite continued effort
+
+This decision must be:
+- host-owned
+- persisted in DB
+- reproducible from cold process
+- visible to the next autonomy tick
+
+No model/planner may silently decide to stop or continue without a matching host ledger record.
+
+#### Target modules
+
+New modules:
+- `src/steward/autonomy/stopping-controller.ts`
+  - `evaluateAutonomyProgressDecision(params)` returns one of:
+    - `stop_completed`
+    - `continue_current_gap`
+    - `replan_goal`
+  - persists `autonomy.goal.decision`
+- `src/steward/autonomy/stopping-controller.test.ts`
+  - stop / continue / replan coverage
+
+Modified modules:
+- `src/steward/autonomy/goal-gap-registry.ts`
+  - consult stopping controller after milestone/gap/skill evidence is current
+  - if decision is `stop_completed`, persist a closed-goal gap record instead of opening another ordinary work gap
+  - if decision is `replan_goal`, emit the governing replan gap kind and evidence
+- `src/steward/autonomy/work-classifier.ts`
+  - derive next class from the stopping decision result
+- `src/steward/autonomy/autonomy-runner.ts`
+  - if controller returns `stop_completed`, autonomy tick must record a queryable no-seed outcome instead of creating new work
+- `src/steward/db/runtime-schema.ts`
+  - add `autonomy.goal.decision` event kind
+
+No new migration is required unless review reveals the decision record needs its own table rather than event-only persistence. Default plan: event-ledger first, gap state remains the canonical open/closed state.
+
+#### Host-owned decision policy
+
+The controller must use persisted evidence only:
+- current open/resolved gap state from `steward_goal_gaps`
+- latest tester verdict state from `steward_tester_verdicts`
+- sealed milestone count from `steward_milestones`
+- repeated bad outcome signals already recorded by `WS-PD`
+- matched skill evidence from `WS-Z4`
+
+Initial stopping/replanning contract for this slice:
+1. `stop_completed`
+   - no remaining unresolved semantic gap
+   - latest tester verdict for the active goal path is `confirmed`
+   - sealed milestone count for the session is `>= 1`
+2. `replan_goal`
+   - repeated rejected/challenged outcomes persist for the same governing gap despite prior skill reuse or milestone attempts
+   - or the controller sees only maintenance/review churn without new sealed milestones across the configured lookback
+3. `continue_current_gap`
+   - default when neither stop nor replan threshold is met
+
+These thresholds must be coded as steward-owned predicates, not prompt instructions.
+
+#### Scope
+
+This slice delivers:
+- host-owned stop / continue / replan decision
+- queryable `autonomy.goal.decision` event evidence
+- closed-goal stop signal formally taking over the old `WS-Z1` deferred responsibility
+- replanning boundary that prevents endless “keep going” despite accumulating negative evidence
+
+#### Out of scope
+
+- multi-goal portfolio scheduling beyond the current session
+- milestone-local detailed replans inside a running active turn
+- human-facing success messaging polish
+- richer confidence weighting for skill reuse or milestone strength
+
+#### Acceptance evidence
+
+Advance only if all of the following are true:
+1. When a goal has no remaining semantic gap after a confirmed tester verdict, the host records `autonomy.goal.decision = stop_completed` and the next autonomy tick does not seed ordinary new work.
+2. When unresolved gaps remain, the host records `continue_current_gap` and ordinary seeding continues.
+3. When repeated negative evidence crosses the host-owned replan boundary, the host records `replan_goal` and the next gap reason/work class reflects replanning rather than ordinary continuation.
+4. The decision is cold-queryable from DB and reproducible without in-memory state.
+5. User-turn behavior is unaffected.
+
+#### Required verification
+
+- focused unit tests:
+  - stop on closed goal
+  - continue on unresolved gap
+  - replan on repeated failed/challenged path
+- focused autonomy runner test:
+  - stop decision yields a no-seed outcome with persisted decision evidence
+- focused user-turn smoke test still passes
+- TypeScript clean
+
+#### Implementer delivery rule
+
+Codex must deliver:
+- explicit host-owned stop / continue / replan logic
+- updated `STEWARD2_SPEC.md` handoff
+- focused verification results with exact decision event evidence shown
+- no advancement language in the implementation handoff
+
+#### Reviewer gate
+
+Before calling REVIEW PASS on `WS-Z5`, confirm:
+- G1 — closed-goal stopping is now host-owned and no longer deferred
+- G2 — the controller uses persisted evidence only, not transient planner text
+- G3 — `replan_goal` has an explicit host-owned threshold and does not rely on vague “seems stuck” logic
+- G4 — stop decision prevents ordinary new autonomy work on the next tick
+- G5 — user-turn path unaffected
+
+#### Advancement gate
+
+Advance only after:
+- focused tests pass
+- TypeScript clean
+- reviewer confirms all three decisions (`stop_completed`, `continue_current_gap`, `replan_goal`) are structurally evidenced
+- updated `STEWARD2_SPEC.md` handoff received
+
+#### Implementation record
+
+Delivered locally on `ws-z5`:
+- added `src/steward/autonomy/stopping-controller.ts`
+  - exports `evaluateAutonomyProgressDecision(...)`
+  - returns one of:
+    - `stop_completed`
+    - `continue_current_gap`
+    - `replan_goal`
+  - uses persisted evidence only:
+    - latest tester verdict
+    - sealed milestone count
+    - repeated challenged verdict count
+    - repeated maintenance/review churn without milestones
+- added `src/steward/autonomy/stopping-controller.test.ts`
+  - covers explicit stop / continue / replan outcomes
+- updated `src/steward/autonomy/goal-gap-registry.ts`
+  - consults the stopping controller after tester verdict + milestone + skill evidence is current
+  - emits `autonomy.goal.decision`
+  - `stop_completed` now resolves prior open gaps and records a resolved `goal_completed` gap row
+  - `replan_goal` now converts the governing gap into a host-owned diagnostic replanning gap
+- updated `src/steward/autonomy/work-classifier.ts`
+  - classifier now exposes:
+    - `decision`
+    - `status`
+    - `gapKind`
+    - `gapEvidence`
+- updated `src/steward/autonomy/autonomy-runner.ts`
+  - `stop_completed` now yields a queryable no-seed outcome:
+    - `autonomy.tick.noop`
+    - `reason = goal_completed`
+  - no ordinary new autonomy task is created on the next tick after host-owned closure
+- updated `src/steward/db/runtime-schema.ts`
+  - adds `autonomy.goal.decision`
+- updated focused tests:
+  - `src/steward/autonomy/goal-gap-registry.test.ts`
+  - `src/steward/autonomy/work-classifier.test.ts`
+  - `src/steward/autonomy/autonomy-runner.test.ts`
+
+#### Local verification
+
+- `corepack pnpm exec vitest run src/steward/autonomy/stopping-controller.test.ts src/steward/autonomy/goal-gap-registry.test.ts src/steward/autonomy/work-classifier.test.ts src/steward/autonomy/autonomy-runner.test.ts src/steward/runtime/ws-a.integration.test.ts`
+  - PASS: `5 files, 30 tests`
+  - required escalation because sandbox Vitest startup hit Windows `spawn EPERM`
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+
+#### Observed DB evidence
+
+Stop path:
+- `steward_goal_gaps` newest row:
+  - `gap_kind = 'goal_completed'`
+  - `work_class = 'goal_work'`
+  - `reason = 'goal_completed_after_confirmed_tester_verdict'`
+  - `status = 'resolved'`
+- `steward_events.kind = 'autonomy.goal.decision'`:
+  - `decision = 'stop_completed'`
+- `steward_events.kind = 'autonomy.tick.noop'`:
+  - `reason = 'goal_completed'`
+- no ordinary new autonomy task is created on the next tick
+
+Continue path:
+- `classifyAutonomyWork(...)` with unresolved tester requirement returns:
+  - `decision = 'continue_current_gap'`
+  - `workClass = 'tester_work'`
+  - `reason = 'tester_required_after_accepted_proof'`
+  - `status = 'open'`
+
+Replan path:
+- repeated challenged tester verdicts produce:
+  - `decision = 'replan_goal'`
+  - `gap_kind = 'replan_required_after_repeated_challenged_path'`
+  - `work_class = 'diagnostic_work'`
+  - `status = 'open'`
+- `steward_events.kind = 'autonomy.goal.decision'`:
+  - `decision = 'replan_goal'`
+
+User-turn safety:
+- `src/steward/runtime/ws-a.integration.test.ts` remained in the focused verification set and passed unchanged
+
+Current carry-forwards:
+- none
+
+#### Status board entry
+
+| Workstream | Status | Notes |
+|---|---|---|
+| WS-Z5 | `implement` | implemented locally on `ws-z5`; focused verification PASS; waiting for reviewer gate |
 
 ---
 
