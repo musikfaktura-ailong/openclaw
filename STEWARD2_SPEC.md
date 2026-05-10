@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z3` reviewed PASS on `ws-z3` (2026-05-10). 5/5 gate conditions confirmed. Confirmed tester verdict seals exactly one `steward_milestones` row (unique index + idempotency guard). Challenged verdict produces no row. Count queryable cold. Full `recordCurrentAutonomyGoalGap` now atomic via `withImmediateTransaction`. 19/19 tests pass. Next step: advance WS-Z3.**
+Current phase: **`WS-Z3` merged (2026-05-10). Post-merge reconciliation done. WS-Z4 (reusable skill capture) opened — spec written. Next step: implement WS-Z4.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is review for `WS-Z3` (sealed milestone recording)
+- the next spec step is implement for `WS-Z4` (reusable skill capture)
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7750,6 +7750,105 @@ One structural observation (no carry-forward): `recordCurrentAutonomyGoalGap` is
 Unrelated local leftover noted by user: `artifacts/` untracked directory — not touched by this implementation, not a carry-forward for WS-Z3.
 
 Verdict: **PASS**
+
+---
+
+## WS-Z3 post-merge reconciliation + WS-Z4 (2026-05-10)
+
+Merge result:
+- `WS-Z3` merged via PR `#32`
+
+Reconciliation:
+- the sealed milestone lane is now on `main`
+- every tester-confirmed verdict produces exactly one `steward_milestones` row (`verdict_id` unique index prevents double-sealing)
+- challenged verdicts produce no milestone row; gap remains open with challenge evidence
+- `countSealedMilestones(sessionId)` is cold-queryable via plain SQL COUNT
+- all evidence objects in `proposeCurrentGap` now carry `sealedMilestoneCount` via the `withMilestoneEvidence` wrapper
+- the full `recordCurrentAutonomyGoalGap` body is atomic: verdict flush + milestone seal + gap upsert occur inside a single `withImmediateTransaction`
+- all five reviewer gate conditions confirmed; 19/19 tests pass; no carry-forwards
+- `artifacts/` untracked local leftover: not a Z3 concern, not touched, not a carry-forward
+
+Decision:
+- `WS-Z3` tranche is **closed**
+- no `WS-Z3` carry-forwards remain open
+
+Remaining gap exposed by Z3:
+- a sealed milestone records *that* the goal-work was confirmed, but the procedural knowledge used to complete it is not yet extracted into the skill store
+- the next goal-work gap cannot yet benefit from matched prior skills (WS-G infrastructure exists but is not wired to the gap pipeline)
+- the stopping controller (WS-Z5) will need per-session skill count as a stability signal; Z4 provides it
+- this is the motivating gap for WS-Z4
+
+Next process step:
+- open WS-Z4 (reusable skill capture)
+
+---
+
+### WS-Z4 — reusable skill capture (2026-05-10)
+
+Why this slice exists:
+- WS-Z3 persists *that* a milestone was sealed; it does not extract *how* the work was done
+- WS-G already delivered the skill store (`steward_knowledge` with `memory_type='skill_sequence'`, `extractSkillSequence`, `matchSkillSequence`)
+- WS-Z4 is the wire connecting the two: sealed milestone → skill extraction → new gap evidence includes matched skill reference
+- without Z4, each gap cycle starts from a blank slate even when prior confirmed work is directly analogous
+
+Implementer: Codex
+
+Reviewer: Claude
+
+#### Intended invariant
+
+For every sealed milestone:
+1. **Extract** — host reads the milestone's `workerProofId` from `steward_milestones.evidence_json`, queries `steward_proofs` to get `task_title` and `flow_id`, then queries `steward_flow_tasks WHERE flow_id = ? AND role = 'primary'` (ordered by `id ASC`) to collect the tool sequence. Calls `extractSkillSequence({ title, toolSequence, taskId, sessionKey: sessionId })`. Emits `autonomy.skill.extracted` event with `knowledgeId`.
+2. **Match** — inside `proposeCurrentGap`, after the gap kind and title are determined, calls `matchSkillSequence({ title: gap.title, sessionKey: sessionId })`. If Jaccard ≥ 0.3, the returned `{ id, title, score }` is merged into the gap's evidence as `matchedSkillId`, `matchedSkillTitle`, `matchedSkillScore`.
+
+Both steps are called from within the same `withImmediateTransaction` as `sealCurrentMilestone` — no new transaction boundary.
+
+If `flow_id` is null on the worker proof (task-type proof with no flow), `toolSequence` is `[]` and `extractSkillSequence` returns `null` (no-op). The gap proceeds without a matched skill.
+
+#### Target modules
+
+- **New** `src/steward/autonomy/skill-bridge.ts` — two thin wrappers:
+  - `extractMilestoneSkill(params: { milestone: RecordedStewardMilestone; sessionId: string; now: number }): Promise<number | null>` — resolves proof → flow → tool sequence → `extractSkillSequence`; emits event
+  - `matchGapSkill(params: { title: string; sessionId: string }): { matchedSkillId: number; matchedSkillTitle: string; matchedSkillScore: number } | null` — thin wrapper over `matchSkillSequence`
+- **New** `src/steward/autonomy/skill-bridge.test.ts` — unit tests
+- **Modified** `src/steward/autonomy/goal-gap-registry.ts`:
+  - `recordCurrentAutonomyGoalGap`: call `await extractMilestoneSkill(milestone)` immediately after `sealCurrentMilestone` (only when milestone is non-null and `!milestone.reused`)
+  - `proposeCurrentGap`: call `matchGapSkill` after gap kind is chosen; merge result into evidence
+  - Note: `recordCurrentAutonomyGoalGap` must become `async` to await `extractMilestoneSkill`
+- **No new migration** — `steward_knowledge` table and its indices from WS-G are sufficient
+
+#### Acceptance evidence
+
+**AC-1 — Skill extracted on first confirmed seal (new milestone only):**
+Test: seal a milestone with a worker proof that has `flow_id` pointing to a flow with one `primary` flow_task. Confirm `steward_knowledge` gains exactly one row with `memory_type='skill_sequence'` and the task title normalised in `metadata_json.normalized`. Confirm `autonomy.skill.extracted` event emitted.
+
+**AC-2 — Skill not extracted on reused milestone:**
+Test: call `sealCurrentMilestone` twice with the same `verdictId`. Second call returns `reused: true`. Confirm `extractMilestoneSkill` is not called on the second invocation (only one `steward_knowledge` row exists for that skill title after both calls).
+
+**AC-3 — Skill not extracted when flow_id is null:**
+Test: worker proof has `flow_id = NULL`. Confirm `extractSkillSequence` returns `null`; no `steward_knowledge` row inserted; gap proceeds normally; no error thrown.
+
+**AC-4 — Matched skill appears in gap evidence:**
+Test: after sealing a milestone (extracts skill from title "Fix broken import"), open a new gap whose proposed title contains "Fix broken import" (same session). Confirm the returned gap's `evidence.matchedSkillId` is non-null and `evidence.matchedSkillScore >= 0.3`.
+
+**AC-5 — No matched skill when no prior skills or title mismatch:**
+Test: fresh session with no `steward_knowledge` rows, or prior skill titled "Deploy static assets" vs gap title "Investigate memory leak". Confirm `evidence.matchedSkillId` is absent (undefined or null) and gap opens normally.
+
+#### Reviewer gate
+
+Before calling REVIEW PASS on WS-Z4, confirm:
+
+- G1 — `extractMilestoneSkill` is called inside `withImmediateTransaction`, not after it
+- G2 — `extractMilestoneSkill` is skipped when `milestone.reused === true`
+- G3 — null `flow_id` is a no-op, not an error
+- G4 — `matchGapSkill` result is merged into evidence, not silently discarded
+- G5 — `goal-gap-registry.ts` is `async` end-to-end if `extractMilestoneSkill` is awaited; all callers updated
+
+#### Status board entry
+
+| Workstream | Status | Notes |
+|---|---|---|
+| WS-Z4 | `implement` | skill-bridge.ts + goal-gap-registry async wrapper |
 
 ---
 
