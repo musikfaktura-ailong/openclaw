@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z3` implemented on `ws-z3` (2026-05-09). Milestone sealing is now a host-owned gap-registry transition: a confirmed tester verdict seals exactly one `steward_milestones` row, challenged verdicts seal none, and sealed milestone count is queryable from cold process and attached to future gap evidence. Focused `WS-Z3` suites plus existing autonomy suites pass locally. Next step: review WS-Z3.**
+Current phase: **`WS-Z3` reviewed PASS on `ws-z3` (2026-05-10). 5/5 gate conditions confirmed. Confirmed tester verdict seals exactly one `steward_milestones` row (unique index + idempotency guard). Challenged verdict produces no row. Count queryable cold. Full `recordCurrentAutonomyGoalGap` now atomic via `withImmediateTransaction`. 19/19 tests pass. Next step: advance WS-Z3.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -582,7 +582,7 @@ This board is the single glanceable source of implementation readiness.
 | PD | Autonomy progress discipline | `advance-ready` | `yes` | advanced 2026-05-08; merged PR #30; carry-forwards none |
 | Z1 | Autonomy goal-gap registry | `advance-ready` | `yes` | advanced 2026-05-08; AC-1/AC-5 stop-signal descoped to WS-Z5; gap recording + class derivation complete |
 | Z2 | Independent tester work class | `advance-ready` | `yes` | reviewed PASS 2026-05-09; 6/6 gate conditions confirmed; 21/21 tests pass; no carry-forwards |
-| Z3 | Sealed milestone recording | `implement` | `yes` | depends on Z2 merged (done); full spec written 2026-05-09; seals milestone on confirmed tester verdict |
+| Z3 | Sealed milestone recording | `advance-ready` | `yes` | reviewed PASS 2026-05-10; 5/5 gate conditions confirmed; 19/19 tests pass; transaction wrap is an improvement |
 
 Interpretation:
 - `Current state` must be one of `analyze`, `implement`, `confirm`, or `advance-ready`
@@ -7720,6 +7720,36 @@ Advance only after:
 
 Current carry-forwards:
 - none
+
+#### Review gate record (2026-05-10)
+
+Reviewer: Claude
+Branch: ws-z3
+Commit: e2ba637443
+Tests: 19/19 pass (5 files: milestone-registry, goal-gap-registry, tester-policy, autonomy-runner, ws-a integration)
+
+Gate condition checks:
+
+**G1 — `steward_milestones` row persisted after confirmed verdict, not after challenged:** PASS
+`sealCurrentMilestone` returns `null` immediately when `verdict.verdict !== "confirmed"` (first guard in function body). For confirmed: inserts a row with `status = 'sealed'` linking `gap_id` and `verdict_id`. Test "does not seal after challenged" directly confirms zero rows written.
+
+**G2 — `verdict_id` uniqueness index prevents double-sealing:** PASS
+`UNIQUE INDEX idx_steward_milestones_verdict ON steward_milestones(verdict_id)` at the DB level. Application-level: `readExistingMilestone(verdictId)` is checked before insert — returns the existing row with `reused: true` rather than attempting a duplicate insert. Double-sealing is blocked at both layers.
+
+**G3 — Sealed milestone count queryable without in-memory state:** PASS
+`countSealedMilestones(sessionId)` is a plain SQL COUNT — no in-memory accumulation. Called inside the same `withImmediateTransaction` as `sealCurrentMilestone`, so the count correctly reflects the just-sealed milestone when `proposeCurrentGap` runs. Sequential count test confirms 0 → 1 → 2 across independent `sealCurrentMilestone` calls.
+
+**G4 — User-turn path unaffected:** PASS
+All new code is in `src/steward/autonomy/milestone-registry.ts`. `sealCurrentMilestone` is only reachable via `recordCurrentAutonomyGoalGap` → `classifyAutonomyWork` → `runAutonomyTick`. No user-turn code paths touch this.
+
+**G5 — No new OpenClaw seam files modified:** PASS
+Changed files: `milestone-registry.ts`, `milestone-registry.test.ts`, `goal-gap-registry.ts`, `goal-gap-registry.test.ts`, `0009_milestones.sql`, `runtime-schema.ts`, `ws-a.integration.test.ts`. All steward-owned.
+
+One structural observation (no carry-forward): `recordCurrentAutonomyGoalGap` is now fully wrapped in `withImmediateTransaction`. This is an improvement over Z2 — the tester verdict flush, milestone sealing, and gap upsert are now atomic. No partial state possible between these three steps.
+
+Unrelated local leftover noted by user: `artifacts/` untracked directory — not touched by this implementation, not a carry-forward for WS-Z3.
+
+Verdict: **PASS**
 
 ---
 
