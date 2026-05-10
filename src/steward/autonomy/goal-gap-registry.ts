@@ -1,8 +1,9 @@
 import { getDb } from "../db/db-bootstrap.js";
-import { withImmediateTransaction } from "../db/tx.js";
+import { withImmediateTransactionAsync } from "../db/tx.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
 import { countSealedMilestones, sealCurrentMilestone } from "./milestone-registry.js";
 import { resolveAutonomyWorkClassBoundary } from "./progress-discipline.js";
+import { extractMilestoneSkill, matchGapSkill } from "./skill-bridge.js";
 import { recordLatestTesterVerdict, resolveTesterGapRequirement } from "./tester-policy.js";
 
 export type AutonomyGapWorkClass =
@@ -35,6 +36,25 @@ function countRows(sql: string, ...params: SqlParam[]): number {
 }
 
 type ProposedGap = Omit<RecordedAutonomyGoalGap, "gapId" | "sessionId" | "status" | "reused">;
+
+function finalizeProposedGap(params: {
+  sessionId: string;
+  gap: ProposedGap;
+  sealedMilestoneCount: number;
+}): ProposedGap {
+  const matchedSkill = matchGapSkill({
+    title: params.gap.title,
+    sessionId: params.sessionId,
+  });
+  const evidence = {
+    ...params.gap.evidence,
+    ...(matchedSkill ?? {}),
+  };
+  return {
+    ...params.gap,
+    evidence: withMilestoneEvidence(evidence, params.sealedMilestoneCount),
+  };
+}
 
 function latestProofSummary(sessionId: string): {
   verdict: "accepted" | "rejected" | null;
@@ -120,7 +140,10 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
   const testerRequirement = resolveTesterGapRequirement(params);
   if (testerRequirement) {
     if (testerRequirement.kind === "tester_required") {
-      return {
+      return finalizeProposedGap({
+        sessionId: params.sessionId,
+        sealedMilestoneCount: params.sealedMilestoneCount,
+        gap: {
         gapKind: testerRequirement.reason,
         workClass: testerRequirement.workClass,
         reason: testerRequirement.reason,
@@ -129,10 +152,14 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
           "A goal-work proof was accepted, but the host requires one independent tester turn before the governing gap can move toward resolved.",
         sourceFlowId: testerRequirement.workerFlowId,
         sourceHostTaskId: testerRequirement.workerTaskId,
-        evidence: withMilestoneEvidence(testerRequirement.evidence, params.sealedMilestoneCount),
-      };
+        evidence: testerRequirement.evidence,
+      },
+      });
     }
-    return {
+    return finalizeProposedGap({
+      sessionId: params.sessionId,
+      sealedMilestoneCount: params.sealedMilestoneCount,
+      gap: {
       gapKind: testerRequirement.reason,
       workClass: testerRequirement.workClass,
       reason: testerRequirement.reason,
@@ -141,8 +168,9 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
         "The independent tester challenged the previous worker proof. The next host-owned action must reopen bounded goal work with the tester challenge evidence attached.",
       sourceFlowId: null,
       sourceHostTaskId: null,
-      evidence: withMilestoneEvidence(testerRequirement.evidence, params.sealedMilestoneCount),
-    };
+      evidence: testerRequirement.evidence,
+    },
+    });
   }
 
   const activeBlockers = countRows(
@@ -159,7 +187,10 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
       fallbackReason: "active_blockers_present",
     });
     const sourceTask = findLatestFailedAutonomyTask(params.sessionId);
-    return {
+    return finalizeProposedGap({
+      sessionId: params.sessionId,
+      sealedMilestoneCount: params.sealedMilestoneCount,
+      gap: {
       gapKind: applied.reason,
       workClass: applied.workClass,
       reason: applied.reason,
@@ -168,12 +199,13 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
         "Open blockers exist in the steward ledger. The next host-owned action must investigate or clear those blockers before more autonomous goal work continues.",
       sourceFlowId: sourceTask?.seed_flow_id ?? null,
       sourceHostTaskId: sourceTask?.id ?? null,
-      evidence: withMilestoneEvidence({
+      evidence: {
         activeBlockerCount: activeBlockers,
         proposedWorkClass: "diagnostic_work",
         boundaryApplied: applied.boundaryApplied,
-      }, params.sealedMilestoneCount),
-    };
+      },
+    },
+    });
   }
 
   const proofCount = countRows(`SELECT COUNT(*) AS count FROM steward_proofs WHERE session_id = ?`, params.sessionId);
@@ -183,7 +215,10 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
       proposedWorkClass: "goal_work",
       fallbackReason: "no_recorded_proof_yet",
     });
-    return {
+    return finalizeProposedGap({
+      sessionId: params.sessionId,
+      sealedMilestoneCount: params.sealedMilestoneCount,
+      gap: {
       gapKind: applied.reason,
       workClass: applied.workClass,
       reason: applied.reason,
@@ -192,12 +227,13 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
         "No steward proof is recorded for this session. The next autonomy cycle must reopen the requirement gap by producing bounded goal work toward a first proof-bearing opportunity.",
       sourceFlowId: null,
       sourceHostTaskId: null,
-      evidence: withMilestoneEvidence({
+      evidence: {
         proofCount,
         proposedWorkClass: "goal_work",
         boundaryApplied: applied.boundaryApplied,
-      }, params.sealedMilestoneCount),
-    };
+      },
+    },
+    });
   }
 
   const recentPrimaryFailures = countRows(
@@ -221,7 +257,10 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
       fallbackReason: "consecutive_primary_failures",
     });
     const sourceTask = findLatestFailedAutonomyTask(params.sessionId);
-    return {
+    return finalizeProposedGap({
+      sessionId: params.sessionId,
+      sealedMilestoneCount: params.sealedMilestoneCount,
+      gap: {
       gapKind: applied.reason,
       workClass: applied.workClass,
       reason: applied.reason,
@@ -230,12 +269,13 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
         "Recent primary autonomy work failed repeatedly. The next host-owned action must reopen the failure gap through diagnosis rather than continuing ordinary goal work.",
       sourceFlowId: sourceTask?.seed_flow_id ?? null,
       sourceHostTaskId: sourceTask?.id ?? null,
-      evidence: withMilestoneEvidence({
+      evidence: {
         recentPrimaryFailures,
         proposedWorkClass: "diagnostic_work",
         boundaryApplied: applied.boundaryApplied,
-      }, params.sealedMilestoneCount),
-    };
+      },
+    },
+    });
   }
 
   const lastAuditTsRow = getDb()
@@ -255,7 +295,10 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
       fallbackReason: lastAuditTsRow.ts == null ? "audit_missing" : "audit_stale",
     });
     const sourceTask = findLatestFailedAutonomyTask(params.sessionId);
-    return {
+    return finalizeProposedGap({
+      sessionId: params.sessionId,
+      sealedMilestoneCount: params.sealedMilestoneCount,
+      gap: {
       gapKind: applied.reason,
       workClass: applied.workClass,
       reason: applied.reason,
@@ -264,13 +307,14 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
         "Mission evidence has not been audited recently enough. The next autonomy cycle must reopen the review gap before more ordinary maintenance continues.",
       sourceFlowId: sourceTask?.seed_flow_id ?? null,
       sourceHostTaskId: sourceTask?.id ?? null,
-      evidence: withMilestoneEvidence({
+      evidence: {
         lastAuditTs: lastAuditTsRow.ts,
         reviewWindowMs,
         proposedWorkClass: "review_or_consolidation",
         boundaryApplied: applied.boundaryApplied,
-      }, params.sealedMilestoneCount),
-    };
+      },
+    },
+    });
   }
 
   const latestProof = latestProofSummary(params.sessionId);
@@ -280,7 +324,10 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
     fallbackReason: "baseline_maintenance_window",
   });
   const sourceTask = findLatestFailedAutonomyTask(params.sessionId, "maintenance_work");
-  return {
+  return finalizeProposedGap({
+    sessionId: params.sessionId,
+    sealedMilestoneCount: params.sealedMilestoneCount,
+    gap: {
     gapKind: applied.reason,
     workClass: applied.workClass,
     reason: applied.reason,
@@ -293,32 +340,40 @@ function proposeCurrentGap(params: { sessionId: string; now: number; sealedMiles
         : "Repeated bad maintenance outcomes were recorded. The next autonomy cycle must change class instead of reseeding the same maintenance family.",
     sourceFlowId: sourceTask?.seed_flow_id ?? latestProof.flowId ?? null,
     sourceHostTaskId: sourceTask?.id ?? null,
-    evidence: withMilestoneEvidence({
+    evidence: {
       latestProofVerdict: latestProof.verdict,
       latestProofFailureClass: latestProof.failureClass,
       latestProofTaskTitle: latestProof.taskTitle,
       proposedWorkClass: "maintenance_work",
       boundaryApplied: applied.boundaryApplied,
-    }, params.sealedMilestoneCount),
-  };
+    },
+  },
+  });
 }
 
-export function recordCurrentAutonomyGoalGap(params: {
+export async function recordCurrentAutonomyGoalGap(params: {
   sessionId: string;
   now?: number;
-}): RecordedAutonomyGoalGap {
+}): Promise<RecordedAutonomyGoalGap> {
   const now = params.now ?? Date.now();
   const db = getDb();
-  return withImmediateTransaction(db, () => {
+  return withImmediateTransactionAsync(db, async () => {
     const recordedVerdict = recordLatestTesterVerdict({
       sessionId: params.sessionId,
       now,
     });
-    sealCurrentMilestone({
+    const milestone = sealCurrentMilestone({
       sessionId: params.sessionId,
       verdict: recordedVerdict,
       now,
     });
+    if (milestone && !milestone.reused) {
+      await extractMilestoneSkill({
+        milestone,
+        sessionId: params.sessionId,
+        now,
+      });
+    }
     const proposed = proposeCurrentGap({
       sessionId: params.sessionId,
       now,

@@ -82,7 +82,7 @@ export async function runAutonomyTick(params: {
     };
   }
 
-  const classification = classifyAutonomyWork({
+  const classification = await classifyAutonomyWork({
     sessionId: decision.sessionId,
     now,
   });

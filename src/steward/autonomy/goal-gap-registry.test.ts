@@ -14,10 +14,10 @@ describe("WS-Z1 goal gap registry", () => {
     resetDbForTest();
   });
 
-  it("records a proof-first open goal gap when no proof exists", () => {
+  it("records a proof-first open goal gap when no proof exists", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:z1-goal-gap", 1_000);
 
-    const gap = recordCurrentAutonomyGoalGap({
+    const gap = await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 1_100,
     });
@@ -66,9 +66,9 @@ describe("WS-Z1 goal gap registry", () => {
     expect(event.data_json).toContain("\"workClass\":\"goal_work\"");
   });
 
-  it("resolves the prior open gap and records a new diagnostic gap after repeated bad maintenance outcomes", () => {
+  it("resolves the prior open gap and records a new diagnostic gap after repeated bad maintenance outcomes", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:z1-boundary-gap", 2_000);
-    recordCurrentAutonomyGoalGap({
+    await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 2_050,
     });
@@ -129,7 +129,7 @@ describe("WS-Z1 goal gap registry", () => {
     insertFailedMaintenance(21, 21, 2_100, "hollow");
     insertFailedMaintenance(22, 22, 2_120, "low_value");
 
-    const gap = recordCurrentAutonomyGoalGap({
+    const gap = await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 2_200,
     });
@@ -167,9 +167,9 @@ describe("WS-Z1 goal gap registry", () => {
     });
   });
 
-  it("keeps the gap open as goal_work with tester challenge evidence after a challenged tester verdict", () => {
+  it("keeps the gap open as goal_work with tester challenge evidence after a challenged tester verdict", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:z2-challenge-gap", 4_000);
-    recordCurrentAutonomyGoalGap({
+    await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 4_010,
     });
@@ -224,7 +224,7 @@ describe("WS-Z1 goal gap registry", () => {
       )
       .run(1, authority.sessionId, 2, 201, 301, "tester found contradiction", 4_040, 4_040);
 
-    const gap = recordCurrentAutonomyGoalGap({
+    const gap = await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 4_100,
     });
@@ -242,9 +242,9 @@ describe("WS-Z1 goal gap registry", () => {
     });
   });
 
-  it("seals a milestone row after a confirmed tester verdict and exposes the sealed count in gap evidence", () => {
+  it("seals a milestone row after a confirmed tester verdict and exposes the sealed count in gap evidence", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:z3-confirmed-gap", 5_000);
-    recordCurrentAutonomyGoalGap({
+    await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 5_010,
     });
@@ -323,7 +323,7 @@ describe("WS-Z1 goal gap registry", () => {
       )
       .run(402, 62, authority.sessionId, 62, 5_050, 5_050);
 
-    const gap = recordCurrentAutonomyGoalGap({
+    const gap = await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 5_100,
     });
@@ -357,5 +357,161 @@ describe("WS-Z1 goal gap registry", () => {
     expect(gap.evidence).toMatchObject({
       sealedMilestoneCount: 1,
     });
+  });
+
+  it("extracts a reusable skill only once for a reused confirmed milestone", async () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:z4-skill-once", 6_000);
+    await recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 6_010,
+    });
+    getDb()
+      .prepare(
+        `UPDATE steward_goal_gaps
+         SET status = 'resolved', updated_ts = ?
+         WHERE session_id = ?`,
+      )
+      .run(6_020, authority.sessionId);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES (?, ?, ?, ?, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap', 'Details', ?, ?, ?)`,
+      )
+      .run(
+        2,
+        authority.sessionId,
+        null,
+        null,
+        JSON.stringify({
+          priorGapId: 1,
+          workerProofId: 501,
+          workerTaskId: 71,
+          workerFlowId: 71,
+        }),
+        6_030,
+        6_030,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_flows (
+           id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, ?, 'research', 'completed', '{}', ?, ?, ?, ?)`,
+      )
+      .run(71, authority.sessionId, process.pid, 6_034, 6_034, 6_034);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, ?, ?, ?, 'general', 'Fix broken import', 'worker proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?)` ,
+      )
+      .run(501, 71, authority.sessionId, 71, 6_035, 6_035);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+         VALUES (?, ?, ?, 'tool.postcheck.normalized', 'Tool postcheck normalized read', ?)`,
+      )
+      .run(6_036, authority.sessionId, 71, JSON.stringify({ toolName: "read" }));
+    getDb()
+      .prepare(
+        `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+         VALUES (?, ?, ?, 'tool.postcheck.normalized', 'Tool postcheck normalized edit', ?)`,
+      )
+      .run(6_037, authority.sessionId, 71, JSON.stringify({ toolName: "edit" }));
+    getDb()
+      .prepare(
+        `INSERT INTO steward_flows (
+           id, session_id, flow_type, status, state_json, owner_pid, created_ts, updated_ts, heartbeat_ts
+         ) VALUES (?, ?, 'control', 'completed', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        72,
+        authority.sessionId,
+        JSON.stringify({
+          seeded_by: "autonomy",
+          autonomy_work_class: "tester_work",
+          gap_evidence: {
+            priorGapId: 2,
+            workerProofId: 501,
+            workerTaskId: 71,
+            workerFlowId: 71,
+          },
+        }),
+        process.pid,
+        6_040,
+        6_040,
+        6_040,
+      );
+    getDb()
+      .prepare(
+        `INSERT INTO steward_host_tasks (
+           id, session_id, source, status, seed_flow_id, work_class, title, details, created_ts, updated_ts, completed_at
+         ) VALUES (?, ?, 'autonomy', 'done', ?, 'tester_work', 'Tester Task', 'Details', ?, ?, ?)` ,
+      )
+      .run(72, authority.sessionId, 72, 6_040, 6_040, 6_040);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES (?, ?, ?, ?, 'general', 'Tester Task', 'tester confirm', '', 'accepted', 1, '', 1, 'confirmed', ?, NULL, '', ?)` ,
+      )
+      .run(502, 72, authority.sessionId, 72, 6_050, 6_050);
+
+    await recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 6_100,
+    });
+    await recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 6_110,
+    });
+
+    const count = getDb()
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM steward_knowledge
+         WHERE session_key = ?
+           AND memory_type = 'skill_sequence'`,
+      )
+      .get(authority.sessionId) as { count: number };
+
+    expect(Number(count.count)).toBe(1);
+  });
+
+  it("adds a matched skill reference into future gap evidence when a prior skill matches the proposed gap title", async () => {
+    const authority = getOrCreateStewardSession("agent:main:webchat:direct:z4-skill-match", 7_000);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_knowledge (
+           session_key, memory_type, text, metadata_json, embedding_blob, embedding_dims, embedding_model, created_ts, updated_ts
+         ) VALUES (?, 'skill_sequence', ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        authority.sessionId,
+        "SKILL_SEQUENCE Autonomy gap no recorded proof yet: read -> edit",
+        JSON.stringify({
+          title: "Autonomy gap no recorded proof yet",
+          normalized: "autonomy gap no recorded proof yet",
+          tool_sequence: ["read", "edit"],
+        }),
+        Buffer.alloc(4),
+        1,
+        "test",
+        7_010,
+        7_010,
+      );
+
+    const gap = await recordCurrentAutonomyGoalGap({
+      sessionId: authority.sessionId,
+      now: 7_100,
+    });
+
+    expect(gap.evidence).toMatchObject({
+      matchedSkillTitle: "Autonomy gap no recorded proof yet",
+    });
+    expect(Number(gap.evidence.matchedSkillScore ?? 0)).toBeGreaterThanOrEqual(0.3);
+    expect(Number(gap.evidence.matchedSkillId ?? 0)).toBeGreaterThan(0);
   });
 });

@@ -27,6 +27,7 @@ export type StewardBlockerStatus = "active" | "resolved";
 export type StewardEventKind =
   | "autonomy.gap.recorded"
   | "autonomy.milestone.sealed"
+  | "autonomy.skill.extracted"
   | "autonomy.tester.verdict"
   | "autonomy.boot.recorded"
   | "autonomy.boot.skipped"

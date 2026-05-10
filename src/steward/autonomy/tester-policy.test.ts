@@ -14,9 +14,9 @@ describe("WS-Z2 tester policy", () => {
     resetDbForTest();
   });
 
-  it("requires a tester turn after an accepted goal-work proof", () => {
+  it("requires a tester turn after an accepted goal-work proof", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:z2-seed-tester", 1_000);
-    const gap = recordCurrentAutonomyGoalGap({
+    const gap = await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 1_050,
     });
@@ -67,9 +67,9 @@ describe("WS-Z2 tester policy", () => {
     });
   });
 
-  it("records a challenged tester verdict from persisted tester flow state", () => {
+  it("records a challenged tester verdict from persisted tester flow state", async () => {
     const authority = getOrCreateStewardSession("agent:main:webchat:direct:z2-record-verdict", 2_000);
-    const goalGap = recordCurrentAutonomyGoalGap({
+    const goalGap = await recordCurrentAutonomyGoalGap({
       sessionId: authority.sessionId,
       now: 2_050,
     });

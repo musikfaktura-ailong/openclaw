@@ -12,6 +12,18 @@ export function withImmediateTransaction<T>(db: DatabaseSync, fn: () => T): T {
   }
 }
 
+export async function withImmediateTransactionAsync<T>(db: DatabaseSync, fn: () => Promise<T>): Promise<T> {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = await fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function withBoundedRetries<T>(params: {
   attempts?: number;
   shouldRetry: (error: unknown) => boolean;
