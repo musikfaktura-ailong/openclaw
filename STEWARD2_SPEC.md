@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z5` merged via PR `#34` on `main` (2026-05-10). Zenith harness tranche `Z1–Z5` is now closed and feature-complete: persisted goal gaps, independent tester lane, sealed milestones, reusable skills, and host-owned stop/continue/replan control are all present. No `WS-Z6` opens automatically. The next tranche is merged-main live deployment evaluation to test whether the completed harness changes real steward behavior under autonomy.**
+Current phase: **Live deployment review FAIL (2026-05-10) — three compounding invalidations found: (1) running process started May 8, predates Z5 merge by 2 days; (2) `dist/` build is from May 7, predates all Zenith merges; (3) Zenith schema absent from live DB (`steward_goal_gaps`, `steward_tester_verdicts`, `steward_milestones` all MISSING); (4) `already_compacted_recently` compaction loop blocks autonomy path entirely — no Zenith code has executed. Required: `pnpm build` + gateway restart + DB reset + compaction loop diagnosis.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is resume merged-main live deployment evaluation
+- the next spec step is fix the four deployment invalidations before resuming live evaluation
 
 ## Live deployment diagnosis — stale gateway process after WS-Z5 merge (2026-05-10)
 
@@ -157,6 +157,58 @@ Only after that restart can a repeated `baseline_maintenance_window` loop be tre
 
 The missing step is deployment correctness:
 - merged code must actually be the code that is running
+
+---
+
+## Live deployment review — independent review against merged WS-Z5 (2026-05-10)
+
+Reviewed against merged `main` at `b1dba33a8c`. Independent check of all four deployment layers.
+
+Verdict: **FAIL — three compounding invalidations; no Zenith code path has executed in any live session**
+
+### Finding 1 — Stale process (confirmed, extends prior diagnosis)
+
+Gateway started: `2026-05-08 08:15 UTC` (derived from `uptimeMs = 218,875,814` at review time).
+WS-Z5 merged: `2026-05-10`. Process predates Z5, Z4, and Z3.
+
+### Finding 2 — Stale dist/ build
+
+Gateway loads from `dist/server.impl-wEQ7In4q.js` (confirmed via May 8 log stack traces).
+`dist/` directory last modified: `2026-05-07`.
+All Zenith merges (Z1–Z5) occurred May 8–10.
+A process restart without a rebuild would still run pre-Zenith code. Rebuild required first.
+
+### Finding 3 — Zenith schema absent from live DB
+
+Live DB: `~/.openclaw/agents/main/sessions/steward.db`
+
+```
+steward_goal_gaps:       MISSING
+steward_tester_verdicts: MISSING
+steward_milestones:      MISSING
+```
+
+Migrations `0007` (Z1), `0008` (Z2), `0009` (Z3) have never been applied to this DB.
+DB last write: `2026-05-05 09:30` — 5.5 days silent at review time.
+The live DB must be deleted or migrated before Zenith evidence can appear.
+
+### Finding 4 — Compaction loop blocking the autonomy path
+
+Every entry in the May 8 live log:
+
+```
+compaction-diag ... reason=already_compacted_recently
+```
+
+Firing every ~60s continuously. The session transcript is overflowing; the overflow compaction guard is blocking retries. No autonomy turn can complete. `recordCurrentAutonomyGoalGap` is not reachable — the Zenith control path has never been entered in the live process. This condition will recur on restart unless the compaction loop is diagnosed and cleared first.
+
+### Required before any valid evaluation
+
+1. `pnpm build` — rebuild `dist/` from merged `main`
+2. Restart the gateway process
+3. Delete the live `steward.db` (force fresh migration on boot; Zenith tables created on first `initStewardDb`)
+4. Diagnose and resolve `already_compacted_recently` — it blocks the autonomy path regardless of code correctness
+5. Only after all four steps can observed autonomy behavior be attributed to merged Zenith code
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
