@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z5` reviewed PASS on `ws-z5` (2026-05-10). 5/5 gate conditions confirmed. Host-owned stopping controller reads persisted evidence only; explicit thresholds for replan (≥2 consecutive challenges or ≥3 churn cycles with zero milestones); stop_completed resolves all open gaps and halts the runner tick. Zenith harness (Z1–Z5) is now feature-complete. 28/28 tests pass. Next step: advance WS-Z5.**
+Current phase: **`WS-Z5` is advance-ready on `ws-z5` (2026-05-10). Zenith harness tranche `Z1–Z5` is now feature-complete: persisted goal gaps, independent tester lane, sealed milestones, reusable skills, and host-owned stop/continue/replan control are all present. No `WS-Z6` opens automatically. After `WS-Z5` merge, the next tranche is merged-main live deployment evaluation to test whether the completed harness changes real steward behavior under autonomy.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is advance WS-Z5 (Zenith harness complete)
+- the next spec step is advance WS-Z5, then resume merged-main live deployment evaluation
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -7562,6 +7562,40 @@ Changed files: `tester-policy.ts`, `tester-policy.test.ts`, `goal-gap-registry.t
 One structural observation (no carry-forward): AC-4 gap resolution is implicit — the `tester_work` gap resolves when `proposeCurrentGap` returns a different gap_kind and the UPDATE fires. This is the correct WS-Z1 upsert pattern, not a missing step. No carry-forwards required.
 
 Verdict: **PASS**
+
+#### Post-merge reconciliation / tranche-close decision (2026-05-10)
+
+Decision:
+- `WS-Z5` closes the Zenith harness tranche
+- no `WS-Z6` opens automatically
+- the next tranche after `WS-Z5` merge is **deployment / live evaluation**, not another planning-first Zenith slice
+
+Why:
+- `WS-Z1` through `WS-Z5` now cover the full harness chain that was intentionally mapped from Zenith:
+  - gap reopening
+  - independent tester
+  - sealed milestone recording
+  - reusable skill capture
+  - host-owned stopping / replanning
+- the remaining unknown is no longer “what harness module is missing?”
+- the remaining unknown is whether the completed harness actually changes live steward behavior:
+  - better work-class selection
+  - cleaner stopping
+  - less hollow churn
+  - stronger tester / milestone / replan dynamics under real autonomy turns
+
+Post-merge tranche outcome to record when `WS-Z5` is merged:
+- Zenith harness status = **closed / feature-complete**
+- next tranche = **live deployment evaluation against merged `main`**
+- opening a new build slice requires a live failure or a new explicitly mapped module family, not a mechanical `Z6`
+
+Next process step after `WS-Z5` merge:
+- resume live deployment testing against merged `main`
+- inspect whether the finished Zenith harness changes:
+  - autonomy turn quality
+  - tester challenge behavior
+  - milestone closure behavior
+  - host-owned replanning frequency
 
 ---
 
