@@ -1,5 +1,7 @@
 import { getDb } from "../db/db-bootstrap.js";
+import { withImmediateTransaction } from "../db/tx.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
+import { countSealedMilestones, sealCurrentMilestone } from "./milestone-registry.js";
 import { resolveAutonomyWorkClassBoundary } from "./progress-discipline.js";
 import { recordLatestTesterVerdict, resolveTesterGapRequirement } from "./tester-policy.js";
 
@@ -104,7 +106,17 @@ function applyBoundary(params: {
   };
 }
 
-function proposeCurrentGap(params: { sessionId: string; now: number }): ProposedGap {
+function withMilestoneEvidence(
+  evidence: Record<string, unknown>,
+  sealedMilestoneCount: number,
+): Record<string, unknown> {
+  return {
+    ...evidence,
+    sealedMilestoneCount,
+  };
+}
+
+function proposeCurrentGap(params: { sessionId: string; now: number; sealedMilestoneCount: number }): ProposedGap {
   const testerRequirement = resolveTesterGapRequirement(params);
   if (testerRequirement) {
     if (testerRequirement.kind === "tester_required") {
@@ -117,7 +129,7 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
           "A goal-work proof was accepted, but the host requires one independent tester turn before the governing gap can move toward resolved.",
         sourceFlowId: testerRequirement.workerFlowId,
         sourceHostTaskId: testerRequirement.workerTaskId,
-        evidence: testerRequirement.evidence,
+        evidence: withMilestoneEvidence(testerRequirement.evidence, params.sealedMilestoneCount),
       };
     }
     return {
@@ -129,7 +141,7 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
         "The independent tester challenged the previous worker proof. The next host-owned action must reopen bounded goal work with the tester challenge evidence attached.",
       sourceFlowId: null,
       sourceHostTaskId: null,
-      evidence: testerRequirement.evidence,
+      evidence: withMilestoneEvidence(testerRequirement.evidence, params.sealedMilestoneCount),
     };
   }
 
@@ -156,11 +168,11 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
         "Open blockers exist in the steward ledger. The next host-owned action must investigate or clear those blockers before more autonomous goal work continues.",
       sourceFlowId: sourceTask?.seed_flow_id ?? null,
       sourceHostTaskId: sourceTask?.id ?? null,
-      evidence: {
+      evidence: withMilestoneEvidence({
         activeBlockerCount: activeBlockers,
         proposedWorkClass: "diagnostic_work",
         boundaryApplied: applied.boundaryApplied,
-      },
+      }, params.sealedMilestoneCount),
     };
   }
 
@@ -180,11 +192,11 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
         "No steward proof is recorded for this session. The next autonomy cycle must reopen the requirement gap by producing bounded goal work toward a first proof-bearing opportunity.",
       sourceFlowId: null,
       sourceHostTaskId: null,
-      evidence: {
+      evidence: withMilestoneEvidence({
         proofCount,
         proposedWorkClass: "goal_work",
         boundaryApplied: applied.boundaryApplied,
-      },
+      }, params.sealedMilestoneCount),
     };
   }
 
@@ -218,11 +230,11 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
         "Recent primary autonomy work failed repeatedly. The next host-owned action must reopen the failure gap through diagnosis rather than continuing ordinary goal work.",
       sourceFlowId: sourceTask?.seed_flow_id ?? null,
       sourceHostTaskId: sourceTask?.id ?? null,
-      evidence: {
+      evidence: withMilestoneEvidence({
         recentPrimaryFailures,
         proposedWorkClass: "diagnostic_work",
         boundaryApplied: applied.boundaryApplied,
-      },
+      }, params.sealedMilestoneCount),
     };
   }
 
@@ -252,12 +264,12 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
         "Mission evidence has not been audited recently enough. The next autonomy cycle must reopen the review gap before more ordinary maintenance continues.",
       sourceFlowId: sourceTask?.seed_flow_id ?? null,
       sourceHostTaskId: sourceTask?.id ?? null,
-      evidence: {
+      evidence: withMilestoneEvidence({
         lastAuditTs: lastAuditTsRow.ts,
         reviewWindowMs,
         proposedWorkClass: "review_or_consolidation",
         boundaryApplied: applied.boundaryApplied,
-      },
+      }, params.sealedMilestoneCount),
     };
   }
 
@@ -281,13 +293,13 @@ function proposeCurrentGap(params: { sessionId: string; now: number }): Proposed
         : "Repeated bad maintenance outcomes were recorded. The next autonomy cycle must change class instead of reseeding the same maintenance family.",
     sourceFlowId: sourceTask?.seed_flow_id ?? latestProof.flowId ?? null,
     sourceHostTaskId: sourceTask?.id ?? null,
-    evidence: {
+    evidence: withMilestoneEvidence({
       latestProofVerdict: latestProof.verdict,
       latestProofFailureClass: latestProof.failureClass,
       latestProofTaskTitle: latestProof.taskTitle,
       proposedWorkClass: "maintenance_work",
       boundaryApplied: applied.boundaryApplied,
-    },
+    }, params.sealedMilestoneCount),
   };
 }
 
@@ -296,115 +308,123 @@ export function recordCurrentAutonomyGoalGap(params: {
   now?: number;
 }): RecordedAutonomyGoalGap {
   const now = params.now ?? Date.now();
-  recordLatestTesterVerdict({
-    sessionId: params.sessionId,
-    now,
-  });
-  const proposed = proposeCurrentGap({
-    sessionId: params.sessionId,
-    now,
-  });
   const db = getDb();
-  const currentOpen = db
-    .prepare(
-      `SELECT id, gap_kind, work_class, reason
-       FROM steward_goal_gaps
-       WHERE session_id = ?
-         AND status = 'open'
-       ORDER BY id DESC`,
-    )
-    .all(params.sessionId) as Array<{ id: number; gap_kind: string; work_class: string; reason: string }>;
+  return withImmediateTransaction(db, () => {
+    const recordedVerdict = recordLatestTesterVerdict({
+      sessionId: params.sessionId,
+      now,
+    });
+    sealCurrentMilestone({
+      sessionId: params.sessionId,
+      verdict: recordedVerdict,
+      now,
+    });
+    const proposed = proposeCurrentGap({
+      sessionId: params.sessionId,
+      now,
+      sealedMilestoneCount: countSealedMilestones(params.sessionId),
+    });
+    const currentOpen = db
+      .prepare(
+        `SELECT id, gap_kind, work_class, reason
+         FROM steward_goal_gaps
+         WHERE session_id = ?
+           AND status = 'open'
+         ORDER BY id DESC`,
+      )
+      .all(params.sessionId) as Array<{ id: number; gap_kind: string; work_class: string; reason: string }>;
 
-  db.prepare(
-    `UPDATE steward_goal_gaps
-     SET status = 'resolved', updated_ts = ?
-     WHERE session_id = ?
-       AND status = 'open'
-       AND NOT (
-         gap_kind = ?
-         AND work_class = ?
-         AND reason = ?
-       )`,
-  ).run(now, params.sessionId, proposed.gapKind, proposed.workClass, proposed.reason);
-
-  const matchingOpen = currentOpen.find(
-    (row) =>
-      row.gap_kind === proposed.gapKind &&
-      row.work_class === proposed.workClass &&
-      row.reason === proposed.reason,
-  );
-
-  let gapId: number;
-  let reused = false;
-  if (matchingOpen) {
-    reused = true;
-    gapId = matchingOpen.id;
     db.prepare(
       `UPDATE steward_goal_gaps
-       SET source_flow_id = ?, source_host_task_id = ?, title = ?, details = ?, evidence_json = ?, updated_ts = ?, status = 'open'
-       WHERE id = ?`,
-    ).run(
-      proposed.sourceFlowId,
-      proposed.sourceHostTaskId,
-      proposed.title,
-      proposed.details,
-      JSON.stringify(proposed.evidence),
-      now,
-      gapId,
+       SET status = 'resolved', updated_ts = ?
+       WHERE session_id = ?
+         AND status = 'open'
+         AND NOT (
+           gap_kind = ?
+           AND work_class = ?
+           AND reason = ?
+         )`,
+    ).run(now, params.sessionId, proposed.gapKind, proposed.workClass, proposed.reason);
+
+    const matchingOpen = currentOpen.find(
+      (row) =>
+        row.gap_kind === proposed.gapKind &&
+        row.work_class === proposed.workClass &&
+        row.reason === proposed.reason,
     );
-  } else {
-    const result = db
-      .prepare(
-        `INSERT INTO steward_goal_gaps (
-           session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
-         ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        params.sessionId,
+
+    let gapId: number;
+    let reused = false;
+    if (matchingOpen) {
+      reused = true;
+      gapId = matchingOpen.id;
+      db.prepare(
+        `UPDATE steward_goal_gaps
+         SET source_flow_id = ?, source_host_task_id = ?, title = ?, details = ?, evidence_json = ?, updated_ts = ?, status = 'open'
+         WHERE id = ?`,
+      ).run(
         proposed.sourceFlowId,
         proposed.sourceHostTaskId,
-        proposed.gapKind,
-        proposed.workClass,
-        proposed.reason,
         proposed.title,
         proposed.details,
         JSON.stringify(proposed.evidence),
         now,
-        now,
-      ) as { lastInsertRowid: number | bigint };
-    gapId = Number(result.lastInsertRowid);
-  }
+        gapId,
+      );
+    } else {
+      const result = db
+        .prepare(
+          `INSERT INTO steward_goal_gaps (
+             session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+           ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          params.sessionId,
+          proposed.sourceFlowId,
+          proposed.sourceHostTaskId,
+          proposed.gapKind,
+          proposed.workClass,
+          proposed.reason,
+          proposed.title,
+          proposed.details,
+          JSON.stringify(proposed.evidence),
+          now,
+          now,
+        ) as { lastInsertRowid: number | bigint };
+      gapId = Number(result.lastInsertRowid);
+    }
 
-  appendStewardEvent({
-    kind: "autonomy.gap.recorded",
-    message: proposed.title,
-    sessionId: params.sessionId,
-    flowId: proposed.sourceFlowId,
-    now,
-    data: {
+    appendStewardEvent({
+      kind: "autonomy.gap.recorded",
+      message: proposed.title,
+      sessionId: params.sessionId,
+      flowId: proposed.sourceFlowId,
+      now,
+      data: {
+        gapId,
+        gapKind: proposed.gapKind,
+        workClass: proposed.workClass,
+        reason: proposed.reason,
+        sourceHostTaskId: proposed.sourceHostTaskId,
+        sourceFlowId: proposed.sourceFlowId,
+        reused,
+        evidence: proposed.evidence,
+      },
+    });
+
+    return {
       gapId,
+      sessionId: params.sessionId,
       gapKind: proposed.gapKind,
       workClass: proposed.workClass,
       reason: proposed.reason,
-      sourceHostTaskId: proposed.sourceHostTaskId,
+      title: proposed.title,
+      details: proposed.details,
       sourceFlowId: proposed.sourceFlowId,
-      reused,
+      sourceHostTaskId: proposed.sourceHostTaskId,
+      status: "open",
       evidence: proposed.evidence,
-    },
+      reused,
+    };
   });
-
-  return {
-    gapId,
-    sessionId: params.sessionId,
-    gapKind: proposed.gapKind,
-    workClass: proposed.workClass,
-    reason: proposed.reason,
-    title: proposed.title,
-    details: proposed.details,
-    sourceFlowId: proposed.sourceFlowId,
-    sourceHostTaskId: proposed.sourceHostTaskId,
-    status: "open",
-    evidence: proposed.evidence,
-    reused,
-  };
 }

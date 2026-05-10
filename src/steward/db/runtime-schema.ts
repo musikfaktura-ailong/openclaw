@@ -26,6 +26,7 @@ export type StewardBlockerStatus = "active" | "resolved";
 
 export type StewardEventKind =
   | "autonomy.gap.recorded"
+  | "autonomy.milestone.sealed"
   | "autonomy.tester.verdict"
   | "autonomy.boot.recorded"
   | "autonomy.boot.skipped"
@@ -160,6 +161,7 @@ export type StewardHostTaskStatus = "pending" | "running" | "done" | "failed" | 
 
 export type StewardGoalGapStatus = "open" | "resolved";
 export type StewardTesterVerdict = "confirmed" | "challenged";
+export type StewardMilestoneStatus = "sealed";
 
 export type StewardGoalGapRow = {
   id: number;
@@ -185,6 +187,19 @@ export type StewardTesterVerdictRow = {
   testerProofId: number;
   verdict: StewardTesterVerdict;
   challengeSummary: string;
+  createdTs: number;
+  updatedTs: number;
+};
+
+export type StewardMilestoneRow = {
+  id: number;
+  sessionId: string;
+  gapId: number;
+  verdictId: number;
+  milestoneKind: string;
+  title: string;
+  status: StewardMilestoneStatus;
+  evidenceJson: string;
   createdTs: number;
   updatedTs: number;
 };
