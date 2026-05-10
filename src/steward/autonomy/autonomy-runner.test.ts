@@ -324,4 +324,67 @@ describe("WS-IC autonomy runner", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("records a queryable no-seed outcome after a host-owned stop decision", async () => {
+    const sessionKey = "agent:main:webchat:direct:auto-stop";
+    const authority = getOrCreateStewardSession(sessionKey, 4_000);
+    setAutonomyMode({ mode: "assistant_plus_autonomy", now: 4_010 });
+    markAutonomyBootCompleted({ completed: true, now: 4_020 });
+    getDb()
+      .prepare(
+        `INSERT INTO steward_goal_gaps (
+           id, session_id, source_flow_id, source_host_task_id, gap_kind, work_class, reason, status, title, details, evidence_json, created_ts, updated_ts
+         ) VALUES (2, ?, NULL, NULL, 'tester_required_after_accepted_proof', 'tester_work', 'tester_required_after_accepted_proof', 'open', 'Tester gap', 'Details', '{}', ?, ?)`,
+      )
+      .run(authority.sessionId, 4_025, 4_025);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_proofs (
+           id, task_id, session_id, flow_id, task_type, task_title, proof_text, history_summary,
+           verdict, score, failure_class, grounded, reason, accepted_at, rejected_at, rejection_reason, created_ts
+         ) VALUES
+           (301, NULL, ?, NULL, 'general', 'Goal Task', 'accepted proof', '', 'accepted', 1, '', 1, '', ?, NULL, '', ?),
+           (401, NULL, ?, NULL, 'general', 'Tester Task', 'confirmed proof', '', 'accepted', 1, '', 1, 'confirmed', ?, NULL, '', ?)`,
+      )
+      .run(authority.sessionId, 4_026, 4_026, authority.sessionId, 4_027, 4_027);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_tester_verdicts (
+           id, session_id, gap_id, worker_proof_id, tester_proof_id, verdict, challenge_summary, created_ts, updated_ts
+         ) VALUES (1, ?, 2, 301, 401, 'confirmed', '', ?, ?)`,
+      )
+      .run(authority.sessionId, 4_030, 4_030);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_milestones (
+           session_id, gap_id, verdict_id, milestone_kind, title, status, evidence_json, created_ts, updated_ts
+         ) VALUES (?, 2, 1, 'goal_gap_confirmed', 'Milestone sealed', 'sealed', '{}', ?, ?)`,
+      )
+      .run(authority.sessionId, 4_040, 4_040);
+    getDb()
+      .prepare(
+        `INSERT INTO steward_events (ts, session_id, flow_id, kind, message, data_json)
+         VALUES (?, ?, NULL, 'mission.audit.report', 'audit', '{}')`,
+      )
+      .run(4_060, authority.sessionId);
+
+    const result = await runAutonomyTick({
+      sessionKey,
+      now: 4_100,
+    });
+    const decisionEvent = getDb()
+      .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.goal.decision' ORDER BY id DESC LIMIT 1`)
+      .get() as { data_json: string };
+    const noopEvent = getDb()
+      .prepare(`SELECT data_json FROM steward_events WHERE kind = 'autonomy.tick.noop' ORDER BY id DESC LIMIT 1`)
+      .get() as { data_json: string };
+
+    expect(result).toMatchObject({
+      status: "noop",
+      reason: "goal_completed",
+      workClass: null,
+    });
+    expect(decisionEvent.data_json).toContain("\"decision\":\"stop_completed\"");
+    expect(noopEvent.data_json).toContain("\"reason\":\"goal_completed\"");
+  });
 });

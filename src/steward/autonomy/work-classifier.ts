@@ -8,8 +8,10 @@ export type AutonomyWorkClass =
   | "review_or_consolidation";
 
 export type ClassifiedAutonomyWork = {
+  decision: "stop_completed" | "continue_current_gap" | "replan_goal";
   workClass: AutonomyWorkClass;
   reason: string;
+  status: "open" | "resolved";
   gapId?: number;
   gapKind?: string;
   gapEvidence?: Record<string, unknown>;
@@ -24,8 +26,10 @@ export async function classifyAutonomyWork(params: {
     now: params.now,
   });
   return {
+    decision: gap.decision,
     workClass: gap.workClass,
     reason: gap.reason,
+    status: gap.status,
     gapId: gap.gapId,
     gapKind: gap.gapKind,
     gapEvidence: gap.evidence,
