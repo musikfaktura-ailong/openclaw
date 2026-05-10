@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`WS-Z5` is advance-ready on `ws-z5` (2026-05-10). Zenith harness tranche `Z1–Z5` is now feature-complete: persisted goal gaps, independent tester lane, sealed milestones, reusable skills, and host-owned stop/continue/replan control are all present. No `WS-Z6` opens automatically. After `WS-Z5` merge, the next tranche is merged-main live deployment evaluation to test whether the completed harness changes real steward behavior under autonomy.**
+Current phase: **`WS-Z5` merged via PR `#34` on `main` (2026-05-10). Zenith harness tranche `Z1–Z5` is now closed and feature-complete: persisted goal gaps, independent tester lane, sealed milestones, reusable skills, and host-owned stop/continue/replan control are all present. No `WS-Z6` opens automatically. The next tranche is merged-main live deployment evaluation to test whether the completed harness changes real steward behavior under autonomy.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -57,7 +57,7 @@ Current decision:
 - OpenClaw is the product/gateway/session foundation
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
-- the next spec step is advance WS-Z5, then resume merged-main live deployment evaluation
+- the next spec step is resume merged-main live deployment evaluation
 
 Repo:
 - [Steward2](C:\ai_agent\Steward2)
@@ -8237,7 +8237,7 @@ Current carry-forwards:
 
 | Workstream | Status | Notes |
 |---|---|---|
-| WS-Z5 | `advance-ready` | implemented locally on `ws-z5`; focused verification PASS; reviewer gate PASS |
+| WS-Z5 | `closed` | merged via PR `#34`; Zenith harness tranche complete; next tranche is merged-main live deployment evaluation |
 
 #### Reviewer gate record (2026-05-10)
 
@@ -8263,6 +8263,31 @@ Unrelated local leftover noted by user: `artifacts/` untracked directory — not
 28/28 tests pass across 5 test files.
 
 Verdict: **PASS**
+
+#### Post-merge reconciliation / tranche-close record (2026-05-10)
+
+Merge result:
+- `WS-Z5` merged via PR `#34`
+- merge commit: `3e8633bc24afae27093693689745dd5120f03e4e`
+
+Reconciliation:
+- the Zenith harness tranche `Z1–Z5` is now complete on `main`
+- no additional `Z6` slice opens automatically
+- the unresolved question is no longer “what harness module is missing?”
+- the unresolved question is now whether the completed harness materially changes live steward behavior under autonomy
+
+Tranche-close decision:
+- Zenith harness status = **closed / feature-complete**
+- next tranche = **live deployment evaluation against merged `main`**
+- any new build slice after this must come from a live failure or a newly mapped module family, not mechanical continuation of the Zenith numbering
+
+Next process step:
+- resume live deployment testing against merged `main`
+- inspect whether the completed harness improves:
+  - autonomy work-class selection
+  - tester challenge behavior
+  - milestone closure behavior
+  - host-owned replanning frequency
 
 ---
 
