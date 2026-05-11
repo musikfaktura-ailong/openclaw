@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`LD-A` closed on live merged `main` (2026-05-11). Next required step is `LD-B` live DB migration correctness, then `LD-C` compaction-loop diagnosis and fix, then `LD-D` valid merged-main live evaluation. No autonomy-quality conclusions are valid until `LD-B` and `LD-C` are also closed.**
+Current phase: **`LD-A` and `LD-B` closed on live merged `main` (2026-05-11). Next required step is `LD-C` compaction-loop diagnosis and fix, then `LD-D` valid merged-main live evaluation. No autonomy-quality conclusions are valid until `LD-C` is also closed.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -58,7 +58,8 @@ Current decision:
 - Steward semantics are layered in deliberately as an inner control core
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
 - `LD-A` is now closed with fresh build/restart evidence on live merged `main`
-- the next spec step is execute `LD-B` and `LD-C` in order, then resume valid live deployment evaluation with `LD-D`
+- `LD-B` is now closed with fresh live DB migration evidence on merged `main`
+- the next spec step is execute `LD-C`, then resume valid live deployment evaluation with `LD-D`
 
 ## Live deployment diagnosis — stale gateway process after WS-Z5 merge (2026-05-10)
 
@@ -290,6 +291,56 @@ Required evidence before advancing:
 
 Advance only if:
 - schema absence invalidation is closed
+
+Implementation/debug record (2026-05-11):
+- identified the live session DB path used by the merged dev gateway:
+  - `C:\Users\kevin\.openclaw-dev\agents\dev\sessions\steward.db`
+- stopped the live gateway and backed up the active live DB set:
+  - `steward.db.ldb-20260511-080636.bak`
+  - `steward.db-wal.ldb-20260511-080636.bak`
+  - `steward.db-shm.ldb-20260511-080636.bak`
+- removed only the active live DB files:
+  - `steward.db`
+  - `steward.db-wal`
+  - `steward.db-shm`
+- restarted merged `main` and verified a fresh live gateway process:
+  - PID `73340`
+  - process start time `2026-05-11 08:06:37`
+  - gateway stdout reached `ready` at `2026-05-11T08:07:17`
+  - `/ready` returned `ready = true`
+  - `/ready.uptimeMs = 231200`
+- verified the fresh recreated live DB files:
+  - `steward.db` `LastWriteTime = 2026-05-11 08:08`
+  - active `steward.db-wal` and `steward.db-shm` recreated from cold boot
+- inspected the fresh live DB directly with SQLite:
+  - `PRAGMA user_version = 9`
+  - required Zenith tables present:
+    - `steward_goal_gaps`
+    - `steward_tester_verdicts`
+    - `steward_milestones`
+  - initial table counts after cold boot:
+    - `steward_events = 14`
+    - `steward_flows = 0`
+    - `steward_host_tasks = 0`
+    - `steward_goal_gaps = 0`
+    - `steward_tester_verdicts = 0`
+    - `steward_milestones = 0`
+- inspected the first persisted boot events on the fresh DB:
+  - `autonomy.boot.recorded`
+  - `autonomy.bridge.tick`
+  - `autonomy.boot.skipped`
+  - `autonomy.policy.blocked`
+  - `autonomy.tick.blocked`
+- those rows prove the fresh post-boot gateway is writing into the recreated DB and that schema presence is no longer a fallback/absence issue
+
+Structural note:
+- Zenith tables are present but still empty because the fresh boot remained in `assistant_only` during `LD-B`
+- that is acceptable for `LD-B`, whose invariant is schema correctness on a cold boot, not autonomy progress quality
+- the next invalidation is whether the live autonomy path becomes unreachable because of the recurring compaction loop
+
+Verdict:
+- schema absence invalidation: closed
+- `LD-B`: PASS / ADVANCE to `LD-C`
 
 #### LD-C — compaction-loop diagnosis and fix
 
