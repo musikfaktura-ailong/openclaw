@@ -11,6 +11,10 @@ function buildMainSessionKey(agentId: string, mainKey?: string): string {
   return `agent:${normalizeAgentId(agentId)}:${normalizeMainKey(mainKey)}`;
 }
 
+function buildAgentScopedSessionKey(agentId: string, scopedKey: string): string {
+  return `agent:${normalizeAgentId(agentId)}:${normalizeMainKey(scopedKey)}`;
+}
+
 export function resolveMainSessionKey(cfg?: {
   session?: { scope?: SessionScope; mainKey?: string };
   agents?: { list?: Array<{ id?: string; default?: boolean }> };
@@ -31,6 +35,12 @@ export function resolveAgentMainSessionKey(params: {
   agentId: string;
 }): string {
   return buildMainSessionKey(params.agentId, params.cfg?.session?.mainKey);
+}
+
+export function resolveAgentAutonomySessionKey(params: {
+  agentId: string;
+}): string {
+  return buildAgentScopedSessionKey(params.agentId, "autonomy");
 }
 
 export function resolveExplicitAgentSessionKey(params: {

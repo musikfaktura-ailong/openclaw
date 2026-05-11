@@ -1,6 +1,6 @@
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { resolveStorePath } from "../../config/sessions/paths.js";
-import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
+import { resolveAgentAutonomySessionKey } from "../../config/sessions/main-session.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { initStewardDb } from "../db/db-bootstrap.js";
 import { appendStewardEvent } from "../runtime/runtime-events.js";
@@ -63,11 +63,11 @@ function resolveAutonomySessionKeys(cfg: OpenClawConfig): string[] {
   const listed = (cfg.agents?.list ?? [])
     .map((entry) => entry?.id?.trim())
     .filter((value): value is string => Boolean(value))
-    .map((agentId) => resolveAgentMainSessionKey({ cfg, agentId }));
+    .map((agentId) => resolveAgentAutonomySessionKey({ agentId }));
   if (listed.length > 0) {
     return Array.from(new Set(listed));
   }
-  return [resolveAgentMainSessionKey({ cfg, agentId: resolveDefaultAgentId(cfg) })];
+  return [resolveAgentAutonomySessionKey({ agentId: resolveDefaultAgentId(cfg) })];
 }
 
 function resolveAutonomyStorePath(cfg: OpenClawConfig): string {

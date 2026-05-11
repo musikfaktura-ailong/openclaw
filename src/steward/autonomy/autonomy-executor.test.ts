@@ -14,6 +14,7 @@ import {
   resolveAutonomyModelRef,
   runAutonomyExecuteCycle,
 } from "./autonomy-executor.js";
+import { resolveAgentAutonomySessionKey } from "../../config/sessions/main-session.js";
 
 async function withTempStore<T>(
   run: (params: { artifactRoot: string; storePath: string }) => Promise<T>,
@@ -215,6 +216,66 @@ describe("WS-L autonomy executor", () => {
     expect(modelRef).toEqual({
       provider: "anthropic",
       model: "claude-sonnet-4",
+    });
+  });
+
+  it("materializes autonomy onto a dedicated session lane instead of reusing the main compacted chat session", async () => {
+    await withTempStore(async ({ artifactRoot, storePath }) => {
+      const mainSessionKey = "agent:main:main";
+      const autonomySessionKey = resolveAgentAutonomySessionKey({ agentId: "main" });
+      await seedOneTask({
+        sessionKey: autonomySessionKey,
+        artifactRoot,
+      });
+      const claimed = claimNextAutonomyTask({
+        sessionId: getOrCreateStewardSession(autonomySessionKey, 1_200).sessionId,
+        now: 1_250,
+      });
+      expect(claimed).toBeTruthy();
+
+      await fs.writeFile(
+        storePath,
+        JSON.stringify(
+          {
+            [mainSessionKey]: {
+              sessionId: "main-session-id",
+              sessionFile: path.join(path.dirname(storePath), "main-session.jsonl"),
+              compactionCheckpoints: [
+                {
+                  checkpointId: "cp-1",
+                  reason: "overflow-retry",
+                  summary: "already compacted",
+                },
+              ],
+              compactionCount: 3,
+            },
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+
+      const params = await materializeAutonomyTurnParams({
+        cfg: createAutonomyTestConfig(),
+        storePath,
+        sessionKey: autonomySessionKey,
+        hostTask: claimed!,
+        modelResolverDeps: createAutonomyModelResolverDeps(),
+      });
+
+      const sessions = JSON.parse(await fs.readFile(storePath, "utf8")) as Record<
+        string,
+        { sessionId?: string; sessionFile?: string; compactionCount?: number }
+      >;
+      expect(Object.keys(sessions)).toEqual(expect.arrayContaining([mainSessionKey, autonomySessionKey]));
+      expect(sessions[mainSessionKey]?.sessionId).toBe("main-session-id");
+      expect(sessions[mainSessionKey]?.compactionCount).toBe(3);
+      expect(sessions[autonomySessionKey]?.sessionId).toBe(params.sessionId);
+      expect(sessions[autonomySessionKey]?.sessionFile).toBe(params.sessionFile);
+      expect(sessions[autonomySessionKey]?.sessionId).not.toBe("main-session-id");
+      expect(params.sessionKey).toBe(autonomySessionKey);
+      expect(params.sessionFile).not.toContain("main-session.jsonl");
     });
   });
 

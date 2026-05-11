@@ -48,7 +48,7 @@ These rules are general and must be followed across all migration workstreams.
 
 Primary task: **complete** — migration tranche is fully defined (Workstreams A–H, port order, advancement checklists, blocking decisions).
 
-Current phase: **`LD-A` and `LD-B` closed on live merged `main` (2026-05-11). Next required step is `LD-C` compaction-loop diagnosis and fix, then `LD-D` valid merged-main live evaluation. No autonomy-quality conclusions are valid until `LD-C` is also closed.**
+Current phase: **`LD-A`, `LD-B`, and `LD-C` closed on live merged `main` (2026-05-11). Next required step is `LD-D` valid merged-main live evaluation. Autonomy-quality conclusions are now valid against merged `main`.**
 
 Keep all Steward2 work separate from the unstable legacy PEQS Phase `5.x` work.
 
@@ -59,7 +59,8 @@ Current decision:
 - deployment testing has advanced past the autonomy identity boundary; the next real live question is how worker output is independently challenged before a gap may move forward
 - `LD-A` is now closed with fresh build/restart evidence on live merged `main`
 - `LD-B` is now closed with fresh live DB migration evidence on merged `main`
-- the next spec step is execute `LD-C`, then resume valid live deployment evaluation with `LD-D`
+- `LD-C` is now closed with dedicated autonomy session-lane evidence on merged `main`
+- the next spec step is begin `LD-D` valid merged-main live evaluation
 
 ## Live deployment diagnosis — stale gateway process after WS-Z5 merge (2026-05-10)
 
@@ -364,6 +365,68 @@ Required evidence before advancing:
 
 Advance only if:
 - compaction invalidation is closed
+
+Implementation/debug record (2026-05-11):
+- mapped the root cause in code:
+  - autonomy bridge resolved its session key with the agent main-session helper
+  - this reused the long-lived operator/chat lane:
+    - `agent:dev:main`
+  - live `sessions.json` proved that lane still pointed at the old May 6–8 transcript with compaction checkpoints and permission-seeking maintenance churn
+  - fresh `LD-B` DB reset did **not** reset that transcript/session-store lane, so a fresh DB could still re-enter stale compaction state
+- direct live evidence before the fix:
+  - `agent:dev:main` session entry still existed with:
+    - old `sessionId = 337393df-cdcc-46dd-be64-083db65d901c`
+    - persisted `compactionCheckpoints`
+    - old maintenance turns and compaction markers in `337393df-...jsonl`
+  - the repeated `already_compacted_recently` failure family therefore belonged to session-lane reuse, not to Zenith gap logic itself
+
+Structural fix:
+- introduced an explicit autonomy-owned session lane:
+  - `resolveAgentAutonomySessionKey({ agentId }) -> agent:<id>:autonomy`
+- updated the autonomy bridge to schedule autonomy cycles on that dedicated lane instead of the agent main-session lane
+- left user/operator main-session continuity untouched
+- added regression coverage proving a pre-compacted main session can coexist while autonomy materializes onto a distinct transcript/session entry
+
+Local verification:
+- `corepack pnpm exec vitest run src/steward/autonomy/autonomy-executor.test.ts src/steward/autonomy/autonomy-bridge.test.ts src/steward/runtime/ws-a.integration.test.ts`
+  - PASS: `3 files, 27 tests`
+- `node --max-old-space-size=8192 .\node_modules\typescript\bin\tsc --noEmit`
+  - PASS
+
+Live deployment evidence after rebuild/restart:
+- rebuilt merged `main` and restarted the live gateway
+- fresh process:
+  - PID `59920`
+  - `/ready = true`
+  - fresh uptime observed after restart
+- re-enabled autonomy on the fresh live DB
+- next autonomy bridge cycle on merged `main` wrote:
+  - `autonomy.goal.decision`
+  - `autonomy.gap.recorded`
+  - `autonomy.task.seeded`
+  - `autonomy.execution.requested`
+  - `runtime.started`
+  - `runtime.stream_started`
+  - `runtime.stream_first_event`
+- those rows carried:
+  - `sessionKey = agent:dev:autonomy`
+- live `sessions.json` proved lane separation:
+  - preserved old operator/chat lane:
+    - `agent:dev:main -> 337393df-cdcc-46dd-be64-083db65d901c.jsonl`
+  - created fresh autonomy lane:
+    - `agent:dev:autonomy -> 59813fa0-12fa-482d-8e92-6f10b5e1b731.jsonl`
+- direct autonomy transcript inspection:
+  - fresh autonomy transcript compaction count = `0`
+
+Structural conclusion:
+- the compaction invalidation was not a transcript-summary bug to patch locally
+- it was an ownership bug:
+  - autonomy was executing on the wrong session lane
+- with the dedicated autonomy lane, merged `main` now reaches Zenith gap logic before any compaction choke point
+
+Verdict:
+- compaction starvation invalidation: closed
+- `LD-C`: PASS / ADVANCE to `LD-D`
 
 #### LD-D — valid merged-main live evaluation
 
